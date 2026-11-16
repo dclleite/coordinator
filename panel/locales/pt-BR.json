@@ -70,7 +70,7 @@
   "action.panel-stop.label": "Parar este painel",
   "action.hold-on.label": "Segurar os merges desta tarefa",
   "action.hold-off.label": "Liberar os merges desta tarefa",
-  "action.sweep-task.label": "Parar sobras que não pedem confirmação",
+  "action.sweep-task.label": "Parar sobras sem perguntar",
   "action.service-verb.label": "Rodar {verb}",
   "action.sweep-task.note": "O que esta tarefa registrou e pode ser parado sem perguntar é parado; o que pede confirmação fica e aparece no resultado.",
 

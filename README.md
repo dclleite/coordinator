@@ -65,6 +65,11 @@ It listens on `127.0.0.1` only, with a fresh key per start that the page and eve
 It exits by itself after `PANEL_IDLE_MIN` minutes without a request (`config/panel.conf`); if it did not, `reap.sh` stops it after twice that time. It is never started at login.
 It needs Python 3; without it, `scripts/status.sh` still prints the board.
 
+The page speaks the language of a table in `panel/locales/`: `en.json` is the default and fills any key another table lacks, and `pt-BR.json` ships with it; a new language is one more file with the same keys.
+`PANEL_LANG` in `config/panel.conf` chooses it: `auto` (the default) takes the first of the browser's languages a table exists for, its base language matching too (`pt` and `pt-PT` get `pt-BR`), else English; a language name forces that table.
+Your own choice goes in `.private/config/panel.conf`, which overrides the tracked file key by key, for example `PANEL_LANG=pt-BR` (or `PANEL_LANG=en` to force English); restart the panel after changing it. An unknown name is refused at start, naming the tables that exist.
+Only what the page writes is translated: titles, states, stages, buttons, questions, times and numbers. Task titles, ledger and handoff lines, a script's output, a service's status lines, and names of roles, models, branches and folders stay as written.
+
 ## What is tracked, and what never is
 
 | Tracked (public) | Never tracked (`.private/`, ignored by git) |
@@ -117,7 +122,7 @@ Kept for good: task records and handoffs, the only durable context.
 ## Registering a service
 
 A service is something long-running that is not a task, such as a team bot.
-Describe it in `.private/services/<name>.conf` (see `config/services.example.conf`): its scope, a status command, its verbs with a class (`auto`, or `confirm` for anything that needs your word) and, if you like, a `verb.<v>.label=` line saying in plain words what each does, the threads and folders that belong to it, and its own panel's address.
+Describe it in `.private/services/<name>.conf` (see `config/services.example.conf`): its scope, a status command, its verbs with a class (`auto`, or `confirm` for anything that needs your word) and, if you like, a `verb.<v>.label=` line saying in plain words what each does (a `verb.<v>.label.<lang>=` line, such as `verb.restart.label.pt-BR=`, says it in the panel's language, falling back to `verb.<v>.label`, then to the verb's name), the threads and folders that belong to it, and its own panel's address.
 On the panel, more than two verbs whose names start with `restart` sit behind one "Restart…" choice.
 `scripts/service.sh status --all` shows every service on the board, `scripts/service.sh run <name> <verb>` runs a verb, and cleanup never touches what a service protects.
 Nothing that names the service is tracked; put its names in the private term list.
