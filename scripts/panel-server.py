@@ -34,13 +34,18 @@ VERB_LINE = re.compile(r"^verb\.([A-Za-z0-9._-]+)=(auto|confirm):")
 LABEL_LINE = re.compile(r"^verb\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*?)\.label(?:\.([A-Za-z0-9-]+))?=(.+)$")
 LANG_NAME = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
 FALLBACK_LANG = "en"
-# Which buttons apply depends on the hold state; ids absent here always apply.
+# Blocking a merge is offered only where a merge can come: a branch or a merge request, from build to ship.
+MERGE_STAGES = ("build", "review", "demo", "developer-review", "ship")
+# Which buttons apply depends on the task (its frontmatter plus _branch and _stop) and the global hold; ids absent here always apply.
 APPLIES = {
-    "hold-on": lambda t, g: t.get("hold_merge") != "yes",
+    "hold-on": lambda t, g: t.get("hold_merge") != "yes" and t.get("_branch", False) and t.get("stage") in MERGE_STAGES,
     "hold-off": lambda t, g: t.get("hold_merge") == "yes",
     "hold-all-on": lambda t, g: not g,
     "hold-all-off": lambda t, g: g,
+    "sweep-task": lambda t, g: bool(t.get("_stop")),
 }
+# Confirmed, these actions get --confirmed: the developer's answer covers what asks first (a service verb, a task's sweep).
+CONFIRMED_FLAG = ("service", "sweep-task")
 
 
 def stamp():
@@ -89,6 +94,9 @@ class Panel:
         self.log_lock = threading.Lock()
         self.run_lock = threading.Lock()
         self.running = set()
+        self.stop_lock = threading.Lock()
+        self.stop_at = 0.0
+        self.stop_cache = {}
 
     def touch(self):
         # Wall-clock seconds on disk: panel.sh reap reads them to stop a server that never exited by itself.
@@ -128,7 +136,7 @@ class Panel:
         for n in names:
             if not n.endswith(".conf") or not WORD.match(n[:-5]):
                 continue
-            verbs, labels, panel = {}, {}, ""   # labels: verb -> {lang or "": text}
+            verbs, labels, panel, threads = {}, {}, "", None   # labels: verb -> {lang or "": text}
             try:
                 with open(os.path.join(sd, n), encoding="utf-8", errors="replace") as f:
                     for line in f.read().splitlines():
@@ -140,9 +148,11 @@ class Panel:
                             verbs[m.group(1)] = m.group(2)
                         elif line.startswith("panel=") and not panel:
                             panel = line[6:]
+                        elif line.startswith("threads=") and threads is None:
+                            threads = [x.strip() for x in line[8:].split(",") if x.strip()]
             except OSError:
                 continue
-            out[n[:-5]] = {"verbs": verbs, "labels": labels, "panel": panel}
+            out[n[:-5]] = {"verbs": verbs, "labels": labels, "panel": panel, "threads": threads or []}
         return out
 
     def actions(self):
@@ -174,19 +184,60 @@ class Panel:
     def hold_all(self):
         return os.path.exists(os.path.join(self.data, "tasks", "HOLD_MERGE"))
 
+    def stoppable(self, task_dir=None):
+        """Relative task id -> [{kind, id}] a confirmed sweep would stop; None when the listing did not answer.
+        Without a task it is the whole board's list, rebuilt at most once per refresh; with one it is always fresh."""
+        if task_dir is None:
+            with self.stop_lock:
+                if self.stop_at and time.monotonic() - self.stop_at < self.refresh:
+                    return self.stop_cache
+        argv = [os.path.join(self.scripts, "sweep.sh"), "--stoppable"] + ([task_dir] if task_dir else [])
+        try:
+            p = subprocess.run(argv, cwd=self.scripts, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, timeout=BOARD_TIMEOUT)
+            found = None if p.returncode else {}
+        except (OSError, subprocess.TimeoutExpired):
+            found = None
+        if found is not None:
+            root = os.path.realpath(os.path.join(self.data, "tasks"))
+            for line in p.stdout.decode("utf-8", "replace").splitlines():
+                c = line.split("\t")
+                if len(c) == 3 and all(c):
+                    found.setdefault(os.path.relpath(os.path.realpath(c[0]), root), []).append({"kind": c[1], "id": c[2]})
+        if task_dir is None:
+            with self.stop_lock:
+                self.stop_cache, self.stop_at = found, time.monotonic()
+        return found
+
+    @staticmethod
+    def has_branch(d, fm):
+        if fm.get("merge_requests", "").strip() not in ("", "-"):
+            return True
+        try:
+            with open(os.path.join(d, "agents.tsv"), encoding="utf-8", errors="replace") as f:
+                return any(len(c) > 6 and c[6].strip() not in ("", "-") for c in (l.split("\t") for l in f))
+        except OSError:
+            return False
+
     def list_actions(self):
         tasks, svcs, g = self.open_tasks(), self.services(), self.hold_all()
         out = {"global": [], "tasks": [], "services": []}
         per_task = {k: [] for k in tasks}
         per_svc = {k: [] for k in svcs}
+        stop = self.stoppable() or {}
+        ctx = {k: dict(fm, _branch=self.has_branch(d, fm), _stop=stop.get(k, [])) for k, (d, fm) in tasks.items()}
         for a in self.actions():
             if a["scope"] == "global":
                 if APPLIES.get(a["id"], lambda t, g: True)({}, g):
                     out["global"].append(self.button(a, a["class"], {}))
             elif a["scope"] == "task":
-                for k, (d, fm) in tasks.items():
-                    if APPLIES.get(a["id"], lambda t, g: True)(fm, g):
-                        per_task[k].append(self.button(a, a["class"], {"{task_dir}": k}))
+                for k in tasks:
+                    if APPLIES.get(a["id"], lambda t, g: True)(ctx[k], g):
+                        b = self.button(a, a["class"], {"{task_dir}": k})
+                        if a["id"] == "sweep-task":
+                            b["items"] = ctx[k]["_stop"]
+                            b["command"] += " --confirmed"
+                        per_task[k].append(b)
             else:
                 for name, s in svcs.items():
                     for verb, vcls in s["verbs"].items():
@@ -234,6 +285,12 @@ class Panel:
         if not isinstance(board, dict):
             return None
         closed, ledgers = self.task_extras()
+        # A thread a service binding names is that service's loop, not an agent of the task that started it.
+        loops = {th: name for name, s in self.services().items() for th in s["threads"]}
+        for x in board.get("tasks") or []:
+            for ag in (x.get("agents") or []) if isinstance(x, dict) else []:
+                if isinstance(ag, dict) and ag.get("thread") in loops:
+                    ag["service"] = loops[ag["thread"]]
         board["panel"] = {"rebuilt": self.board_ok, "closed": closed, "ledgers": ledgers,
                           "idle_min": self.idle / 60, "refresh_sec": self.refresh}
         return board
@@ -326,6 +383,10 @@ class Panel:
             task_dir = tasks[key][0]
             subst["{task_dir}"] = task_dir
             target = key
+            # The list can change between the board and the press: nothing left to stop is refused, asked or not.
+            if aid == "sweep-task" and not (self.stoppable(task_dir) or {}).get(key):
+                return 410, {"error": "this task has nothing left running to stop", "code": "nothing-to-stop",
+                             "_class": cls, "_target": target}
         elif a["scope"] == "service":
             name, verb = req.get("service", ""), req.get("verb", "")
             svcs = self.services()
@@ -346,7 +407,7 @@ class Panel:
             return 428, {"error": "needs confirmation", "code": "needs-confirmation", "confirm": True, "_class": cls, "_target": target}
         argv = [subst.get(w, w) for w in a["argv"]]
         argv[0] = os.path.join(self.scripts, argv[0])
-        if a["scope"] == "service" and cls == "confirm":
+        if cls == "confirm" and (a["scope"] in CONFIRMED_FLAG or aid in CONFIRMED_FLAG):
             argv.append("--confirmed")
         if not os.access(argv[0], os.X_OK):
             return 404, {"error": "the action's script is missing", "code": "script-missing", "_class": cls, "_target": target}
@@ -368,6 +429,8 @@ class Panel:
                             "button %s exit %d" % (aid, code)],
                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.last_board = 0.0
+        with self.stop_lock:
+            self.stop_at = 0.0
         text = out.decode("utf-8", "replace")
         if len(text) > OUTPUT_MAX:
             text = text[:OUTPUT_MAX] + "\n(cut)"

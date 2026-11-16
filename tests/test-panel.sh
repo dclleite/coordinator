@@ -143,13 +143,14 @@ dynamic = {
     "stage.": stages + ["unknown"],
     "svcstate.": ["ok", "degraded", "down", "unknown"],
     "loopstate.": re.search(r"every \(\\d\+\) \?s\(\?:: \(([a-z|]+)\)", script).group(1).split("|"),
-    "action.": [a + ".label" for a in actions] + [a + ".note" for a in actions],
+    "action.": [a + s for a in actions for s in (".label", ".note", ".hint")],
+    "kind.": [k + s for k in kinds for s in (".one", ".other")],
     "server.": sorted(codes),
     "reading.": re.findall(r"^report ([a-z_]+) ", health, re.M) + kinds,
     "meter.": re.findall(r"^report [a-z_]+ .* ([A-Z]+)(?: unknown-ok)?$", health, re.M),
 }
 # A note is optional, and so is a reading's or a meter word's name: the page falls back to the data.
-optional = ("action.", "server.", "reading.", "meter.")
+optional = ("action.", "server.", "reading.", "meter.", "kind.")
 plural_suffix = re.compile(r"\.(zero|one|two|few|many|other)$")
 
 
@@ -351,12 +352,97 @@ eq "actions answer" 200 "$(req GET /api/actions -H "X-Panel-Token: $(tok)")"
 cp "$W/body" "$W/actions"
 pick() { python3 -c 'import json,sys; print(eval(sys.argv[1], {"j": json.load(open(sys.argv[2]))}))' "$1" "$W/actions"; }
 eq "global buttons" "refresh inbox-seen hold-all-on reap-preview reap panel-stop" "$(pick '" ".join(a["id"] for a in j["global"])')"
-eq "task buttons apply now" "company/ACME-1-alpha: hold-on sweep-task" "$(pick '"; ".join(t["task"]+": "+" ".join(a["id"] for a in t["actions"]) for t in j["tasks"])')"
+eq "a task at intake with no branch and nothing left running has no button" "company/ACME-1-alpha: " "$(pick '"; ".join(t["task"]+": "+" ".join(a["id"] for a in t["actions"]) for t in j["tasks"])')"
 eq "service verbs take the binding's class" "ping:auto restart:confirm slow:auto" "$(pick '" ".join(a["verb"]+":"+a["class"] for s in j["services"] for a in s["actions"])')"
 eq "a binding's label names the verb, else the table's label" "Ping it|Run restart|Run slow" "$(pick '"|".join(a["label"] for s in j["services"] for a in s["actions"])')"
 eq "a binding's labels per language go to the page" "ping:=Ping it,pt-BR=Pingar restart:pt-BR=auto: touch ptran.txt slow:" \
   "$(pick '" ".join(a["verb"]+":"+",".join(k+"="+v for k, v in sorted(a["verb_labels"].items())) for s in j["services"] for a in s["actions"])')"
-eq "a button says what it runs" "hold.sh on company/ACME-1-alpha" "$(pick 'j["tasks"][0]["actions"][0]["command"]')"
+
+# What a task's stop button offers: open rows still alive, with a stop command, not protected by a service.
+# Fake kinds list and stop lines of files under $DATA/fake; every listing of fakeauto adds a line to its calls file.
+FK=$COORD_DATA/fake; mkdir -p "$FK" "$COORD_DATA/config"
+printf 'b1\nb2\na1\nguarded-1\nlate\n' > "$FK/fakeauto"; printf 'c1\n' > "$FK/fakebox"; printf 'n1\n' > "$FK/nostop"
+fake_row() { # <kind> <stop: yes|no> <class>
+  local stop=-; [ "$2" = yes ] && stop="grep -vxF {id} \"\$DATA/fake/$1\" > \"\$DATA/fake/$1.t\"; mv \"\$DATA/fake/$1.t\" \"\$DATA/fake/$1\""
+  printf '%s\techo 0\t-\t%s\t%s\t%s\n' "$1" "echo x >> \"\$DATA/fake/calls.$1\"; cat \"\$DATA/fake/$1\"" "$stop" "$3"; }
+{ fake_row fakeauto yes auto; fake_row fakebox yes confirm; fake_row nostop no auto
+  printf 'deaf\techo 0\t-\texit 1\ttrue\tauto\n'; } > "$COORD_DATA/config/resources.tsv"
+printf 'protect=guarded-1\nthreads=thr_loop1, thr_loop2\n' >> "$COORD_DATA/services/acme.conf"
+D=$($S/task-new.sh personal ACME-4 delta "Delta task")
+for r in "fakeauto b1" "fakeauto b2" "fakebox c1" "nostop n1" "deaf d1" "fakeauto guarded-1" "fakeauto gone-1"; do
+  $S/resource-add.sh "$D" $r >/dev/null; done
+$S/resource-add.sh "$A" fakeauto a1 >/dev/null
+E=$($S/task-new.sh personal ACME-5 echo "Echo task"); $S/resource-add.sh "$E" deaf e1 >/dev/null; $S/resource-add.sh "$E" nostop n1 >/dev/null
+# Service loops on delta: two rows whose threads the binding names, beside one agent of the task's own.
+$S/agent-add.sh "$D" worker codex m medium "$PE/app" - - thr_d >/dev/null
+$S/agent-add.sh "$D" worker codex m medium "$PE/app" - - thr_loop1 >/dev/null
+$S/agent-add.sh "$D" worker codex m medium "$PE/app" - - thr_loop2 >/dev/null; $S/agent-set.sh "$D" thr_loop2 state waiting >/dev/null
+sleep 1.1; rm -f "$FK"/calls.*
+req GET /api/actions -H "X-Panel-Token: $(tok)" >/dev/null; cp "$W/body" "$W/actions"
+eq "one listing per kind per refresh, not one per task" 1 "$(wc -l < "$FK/calls.fakeauto" | tr -d ' ')"
+items() { pick '" ".join(i["kind"]+":"+i["id"] for t in j["tasks"] if t["task"]=="'"$1"'" for a in t["actions"] if a["id"]=="sweep-task" for i in a["items"])'; }
+eq "the stop button lists what is alive, with a stop command, not protected" "fakeauto:b1 fakeauto:b2 fakebox:c1" "$(items personal/ACME-4-delta)"
+eq "another task's alive row is its own" "fakeauto:a1" "$(items company/ACME-1-alpha)"
+eq "a listing that does not answer and a kind with no stop command offer nothing" "personal/ACME-5-echo: " \
+  "$(pick '"; ".join(t["task"]+": "+" ".join(a["id"] for a in t["actions"]) for t in j["tasks"] if t["task"]=="personal/ACME-5-echo")')"
+eq "the stop button says it confirms what asks first" "sweep.sh personal/ACME-4-delta --confirmed" \
+  "$(pick '[a["command"] for t in j["tasks"] if t["task"]=="personal/ACME-4-delta" for a in t["actions"] if a["id"]=="sweep-task"][0]')"
+eq "a press with nothing left to stop is refused" 410 "$(run '{"id":"sweep-task","task":"personal/ACME-5-echo","confirmed":true}')"
+ok "with a code the page translates" grep -q '"code": "nothing-to-stop"' "$W/body"
+eq "refused before it asks" 410 "$(run '{"id":"sweep-task","task":"personal/ACME-5-echo"}')"
+ok "and logged as refused" grep -q $'\tconfirm\tsweep-task\tpersonal/ACME-5-echo\trefused$' "$P/log"
+eq "the stop asks first" 428 "$(run '{"id":"sweep-task","task":"personal/ACME-4-delta"}')"
+ok "and asking stopped nothing" grep -qx c1 "$FK/fakebox"
+eq "a confirmed stop runs" 200 "$(run '{"id":"sweep-task","task":"personal/ACME-4-delta","confirmed":true}')"
+ok "it reached sweep.sh with --confirmed: what asks first is stopped" grep -q 'fakebox c1: stopped' "$W/body"
+fails 1 "the confirm-class fixture is gone" grep -qx c1 "$FK/fakebox"
+ok "one line per item as sweep.sh prints it" grep -q 'fakeauto b1: stopped.*fakeauto b2: stopped' "$W/body"
+ok "the protected one is kept" grep -qx guarded-1 "$FK/fakeauto"
+eq "nothing left: the button is gone" "" "$(req GET /api/actions -H "X-Panel-Token: $(tok)" >/dev/null; cp "$W/body" "$W/actions"; items personal/ACME-4-delta)"
+eq "and a press is refused" 410 "$(run '{"id":"sweep-task","task":"personal/ACME-4-delta","confirmed":true}')"
+# A row recorded after the board was read still counts at the press: the server lists again.
+$S/resource-add.sh "$E" fakeauto late >/dev/null
+eq "the press lists again instead of trusting the board" 200 "$(run '{"id":"sweep-task","task":"personal/ACME-5-echo","confirmed":true}')"
+ok "and stopped it" grep -q 'fakeauto late: stopped' "$W/body"
+
+# The block button: a branch or a merge request, at a stage from build to ship; lifting is offered on any held task.
+hold_ids() { req GET /api/actions -H "X-Panel-Token: $(tok)" >/dev/null; cp "$W/body" "$W/actions"
+  pick '" ".join(a["id"] for t in j["tasks"] if t["task"]=="'"$1"'" for a in t["actions"] if a["id"].startswith("hold"))'; }
+$S/task-set.sh "$D" stage build
+eq "build with no branch and no merge request: no block" "" "$(hold_ids personal/ACME-4-delta)"
+$S/agent-add.sh "$D" worker codex m medium "$PE/app" - feature-x thr_b >/dev/null
+eq "build with a branch: block" hold-on "$(hold_ids personal/ACME-4-delta)"
+for st in review demo developer-review ship; do $S/task-set.sh "$D" stage "$st"; eq "$st with a branch: block" hold-on "$(hold_ids personal/ACME-4-delta)"; done
+for st in intake align watch cleanup; do $S/task-set.sh "$D" stage "$st"; eq "$st with a branch: no block" "" "$(hold_ids personal/ACME-4-delta)"; done
+$S/task-set.sh "$E" stage ship; $S/task-set.sh "$E" merge_requests "!7"
+eq "ship with a merge request and no branch: block" hold-on "$(hold_ids personal/ACME-5-echo)"
+$S/task-set.sh "$E" stage intake; $S/hold.sh on "$E" >/dev/null
+eq "a held task at intake offers the lift" hold-off "$(hold_ids personal/ACME-5-echo)"
+$S/hold.sh off "$E" >/dev/null; $S/task-set.sh "$D" stage build
+hold_ids personal/ACME-4-delta >/dev/null
+eq "a button says what it runs" "hold.sh on personal/ACME-4-delta" \
+  "$(pick '[a["command"] for t in j["tasks"] if t["task"]=="personal/ACME-4-delta" for a in t["actions"] if a["id"]=="hold-on"][0]')"
+
+# A service's loops: marked with the service on the board, and left out of what the page counts.
+req GET /api/board -H "X-Panel-Token: $(tok)" >/dev/null
+eq "the board marks a bound thread with its service" "thr_d: thr_loop1:acme thr_loop2:acme thr_b:" \
+  "$(bj '" ".join(a["thread"]+":"+a.get("service","") for x in j["tasks"] if x["key"]=="ACME-4" for a in x["agents"])')"
+if command -v node >/dev/null 2>&1; then
+  python3 - "$ROOT/panel/index.html" > "$W/count.js" <<'COUNT_EOF'
+import re, sys
+page = open(sys.argv[1], encoding="utf-8").read()
+fns = [re.search(r"\nfunction %s\(.*" % n, page).group(0).strip() for n in ("ownAgents", "loopsOf")]
+print("\n".join(fns) + """
+const x = { agents: [{ state: "running" }, { state: "running", service: "acme" }, { state: "waiting", service: "acme" }, { state: "done" }] };
+console.log(ownAgents(x).length, ownAgents(x).filter((a) => a.state === "running").length, [...loopsOf(x)].join(";"));""")
+COUNT_EOF
+  eq "the page counts the task's own agents, and the loops apart per service" "2 1 acme,2" "$(node "$W/count.js")"
+  eq "every count and tree of agents goes through ownAgents or loopsOf" "ownAgents loopsOf" \
+    "$(grep -F '.agents' "$H" | sed -n 's/^function \([A-Za-z]*\)(.*/\1/p' | paste -sd' ' -)"
+  eq "and nothing else reads a task's agents" 2 "$(grep -cF '.agents' "$H")"
+else
+  echo "page count checks skipped: node is missing"
+fi
 
 # What may run.
 eq "unknown action refused" 404 "$(run '{"id":"rm-everything"}')"
@@ -384,16 +470,14 @@ run '{"id":"service-verb","service":"acme","verb":"ping"}' >/dev/null
 ok "output is returned" grep -q '"output": "pong' "$W/body"
 
 # Records: the panel log and the task ledger get the press, never its output.
-eq "sweep runs when confirmed" 200 "$(run '{"id":"sweep-task","task":"company/ACME-1-alpha","confirmed":true}')"
-ok "sweep printed something" grep -q 'nothing recorded' "$W/body"
-ok "press in the panel log" grep -q $'\tsweep-task\tcompany/ACME-1-alpha\t0$' "$P/log"
+ok "press in the panel log" grep -q $'\tsweep-task\tpersonal/ACME-4-delta\t0$' "$P/log"
 ok "service press in the panel log" grep -q $'\tservice-verb\tacme restart\t0$' "$P/log"
-ok "press in the task ledger" grep -q $'\tpanel\tbutton sweep-task exit 0$' "$A/ledger.md"
-fails 1 "no output in the panel log" grep -q 'nothing recorded\|pong' "$P/log"
-fails 1 "no output in the ledger" grep -q 'nothing recorded' "$A/ledger.md"
+ok "press in the task ledger" grep -q $'\tpanel\tbutton sweep-task exit 0$' "$D/ledger.md"
+fails 1 "no output in the panel log" grep -q 'stopped\|pong' "$P/log"
+fails 1 "no output in the ledger" grep -q 'stopped' "$D/ledger.md"
 ok "a refused press is logged with class, action, target and refused" grep -q $'\tconfirm\thold-off\tcompany/ACME-1-alpha\trefused$' "$P/log"
 ok "an unknown action is logged as refused" grep -q $'\t-\trm-everything\t-\trefused$' "$P/log"
-ok "a press is logged with its class" grep -q $'\tconfirm\tsweep-task\tcompany/ACME-1-alpha\t0$' "$P/log"
+ok "a press is logged with its class" grep -q $'\tconfirm\tsweep-task\tpersonal/ACME-4-delta\t0$' "$P/log"
 j=$(python3 -c 'import json; print(json.dumps({"id":"hold-on","task":"company/x\ty\nz"}))')
 run "$j" >/dev/null
 eq "a refused value cannot add a line or a field to the log" 0 "$(awk -F'\t' 'NF != 5' "$P/log" | wc -l | tr -d ' ')"

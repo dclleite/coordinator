@@ -145,10 +145,13 @@ code, .cmd { font-family: var(--mono); font-size: 0.92em; background: var(--sunk
 .ag-live { font-size: var(--s1); color: var(--muted); }
 .fold { align-self: flex-start; background: none; border: 0; padding: 2px 0; color: var(--accent); cursor: pointer; font-size: var(--s2); text-decoration: underline; text-underline-offset: 3px; }
 .empty { color: var(--muted); font-size: var(--s2); margin: 0; }
+.loops { font-size: var(--s2); color: var(--ink-2); margin: 0; }
+.where { font-size: var(--s1); color: var(--muted); margin: 0; padding-top: 10px; border-top: 1px solid var(--line); }
 
 /* Actions: auto is a plain button; confirm is drawn the same, with a trailing "…" and an "asks first" mark. Amber is kept for what needs you. */
 .acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .acts .lbl { font-size: var(--s1); color: var(--muted); width: 100%; }
+.hint { font-size: var(--s1); color: var(--muted); margin: -2px 0 0; }
 .btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 12px; border-radius: 7px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font-size: var(--s2); font-weight: 550; cursor: pointer; max-width: 100%; text-align: left; overflow-wrap: anywhere; }
 .btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .btn:disabled { opacity: 0.5; cursor: default; }
@@ -164,6 +167,8 @@ code, .cmd { font-family: var(--mono); font-size: 0.92em; background: var(--sunk
 .ask:focus-visible { outline: 2px solid var(--accent); }
 .ask .q { font-weight: 600; }
 .ask .d { font-size: var(--s2); color: var(--ink-2); }
+.ask .items { margin: 0; padding-left: 18px; font-size: var(--s2); }
+.ask .items li { overflow-wrap: anywhere; }
 .res { border-radius: 8px; border: 1px solid var(--line); background: var(--sunk); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; font-size: var(--s2); }
 .res.fail { border-color: var(--bad); background: var(--bad-soft); }
 .res-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
@@ -187,7 +192,7 @@ code, .cmd { font-family: var(--mono); font-size: 0.92em; background: var(--sunk
 .lines li { overflow-wrap: anywhere; color: var(--ink-2); }
 .lines .t { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 8px; }
 .lines .e { font-weight: 600; margin-right: 6px; color: var(--ink); }
-.svc { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.svc { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); scroll-margin-top: 70px; }
 .svc:first-child { border-top: 0; padding-top: 0; }
 .svc-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .svc-head b { font-size: var(--s4); }
@@ -275,7 +280,8 @@ function has(key) { return typeof STR[key] === "string"; }
 function fill(s, vars) { return s.replace(/\{([a-z]+)\}/g, (m, k) => (vars && k in vars ? String(vars[k]) : m)); }
 function t(key, vars) { return fill(has(key) ? STR[key] : key, vars); }
 // Plurals: <key>.zero for exactly 0 when the table has it, else <key>.<category> by the language's rules, then <key>.other.
-function tn(key, n, vars) { const k = key + "." + (n === 0 && has(key + ".zero") ? "zero" : PLURAL.select(n)); return t(has(k) ? k : key + ".other", Object.assign({ n: num(n) }, vars)); }
+function pkey(key, n) { const k = key + "." + (n === 0 && has(key + ".zero") ? "zero" : PLURAL.select(n)); return has(k) ? k : key + ".other"; }
+function tn(key, n, vars) { return t(pkey(key, n), Object.assign({ n: num(n) }, vars)); }
 // A text with an element in it: {name} placeholders whose value is a node are put in as that node.
 function tnodes(key, vars, wrap) {
   return t(key).split(/(\{[a-z]+\})/).filter(Boolean).map((p) => {
@@ -292,8 +298,18 @@ function actionLabel(a) {
   // A binding's label in this language, then its own, then the table's words for the action, then the server's.
   if (a.verb !== undefined) { const v = a.verb_labels || {}; if (v[LANG]) return v[LANG]; if (v[""]) return v[""]; }
   const k = "action." + a.id + ".label";
-  return has(k) ? t(k, { verb: a.verb || "" }) : a.label;
+  return has(k) ? t(k, { verb: a.verb || "", what: itemsText(a.items) }) : a.label;
 }
+// What a button stops, counted per kind in the order the server listed them: "2 browsers, 1 container".
+function kindCount(kind, n) { return has("kind." + kind + ".other") ? tn("kind." + kind, n) : num(n) + " " + readingName(kind).toLowerCase(); }
+function itemsText(items) {
+  const n = new Map(); for (const i of items || []) n.set(i.kind, (n.get(i.kind) || 0) + 1);
+  return [...n].map(([k, c]) => kindCount(k, c)).join(", ");
+}
+// A service's loops are its own, not the task's agents: they are left out of every count and tree of agents.
+function ownAgents(x) { return (x.agents || []).filter((a) => !a.service); }
+function loopsOf(x) { const n = new Map(); for (const a of x.agents || []) if (a.service) n.set(a.service, (n.get(a.service) || 0) + 1); return n; }
+function svcAnchor(name) { return "svc-" + String(name).replace(/[^A-Za-z0-9-]/g, "-"); }
 function serverText(j) { return j && j.code && has("server." + j.code) ? t("server." + j.code) : (j && j.error) || ""; }
 document.documentElement.lang = LANG;
 for (const e of document.querySelectorAll("[data-i18n]")) e.textContent = t(e.dataset.i18n);
@@ -460,6 +476,8 @@ function group(gkey, list, target, label, inResult) {
     if (label) add(row, el("span", "lbl", label));
     for (const a of list) add(row, button(a, target, gkey));
     add(box, row);
+    const hint = list.map((a) => "action." + a.id + ".hint").find(has);
+    if (hint) add(box, el("p", "hint", t(hint)));
   }
   const r = ui.results[gkey];
   if (r && inResult !== false) add(box, result(r, gkey));
@@ -496,6 +514,11 @@ function ask(a, target, gkey) {
     : target.service ? t("ask.q.service", { action: label, target: target.service }) : t("ask.q", { action: label });
   add(box, el("div", "q", q));
   const note = "action." + a.id + ".note";
+  if ((a.items || []).length) {
+    const ul = el("ul", "items");
+    for (const i of a.items) add(ul, el("li", null, readingName(i.kind) + " · " + i.id));
+    add(box, el("div", "d", t("ask.stops")), ul);
+  }
   add(box, add(el("div", "d"), tnodes("ask.runs", { cmd: el("code", null, a.command) }), has(note) ? " " + t(note) : "", " " + t("ask.nothing")));
   const row = el("div", "acts");
   const go = el("button", "btn primary", t("ask.yes", { action: label.charAt(0).toLowerCase() + label.slice(1) })); go.type = "button"; go.dataset.fk = "go:" + key;
@@ -549,8 +572,6 @@ function result(r, gkey) {
   x.addEventListener("click", () => { delete ui.results[gkey]; render(); });
   add(box, add(head, x));
   if (r.text) {
-    const kept = r.id === "sweep-task" ? r.text.split("\n").filter((l) => /: kept\b/.test(l)).length : 0;
-    if (kept) add(box, el("p", "empty", tn("res.kept", kept)));
     if (r.ok && !OPEN_OUTPUT.has(r.id) && r.text.split("\n").length > 4) {
       const d = el("details"); add(d, el("summary", null, t("res.output")), el("pre", null, r.text)); add(box, d);
     } else add(box, el("pre", null, r.text));
@@ -602,9 +623,9 @@ function fold(key, name, summary, sumCls, fillBody) {
 function render() {
   if (!board) return;
   const tasks = board.tasks || [], services = board.services || [], health = board.health || {};
-  part("attn", [tasks.map((x) => [x.key, x.dir, x.title, x.stage, x.waiting_on, x.needs_developer, x.hold_merge, (x.agents || []).map((a) => a.state)]),
+  part("attn", [tasks.map((x) => [x.key, x.dir, x.title, x.stage, x.waiting_on, x.needs_developer, x.hold_merge, ownAgents(x).map((a) => a.state)]),
     board.inbox, board.hold_all, health, services.map((s) => [s.name, s.state, s.detail]), board.panel && board.panel.closed, actions], drawAttention);
-  const agents = tasks.flatMap((x) => x.agents || []);
+  const agents = tasks.flatMap(ownAgents);
   const count = (s) => agents.filter((a) => stateOf(a.state) === s).length;
   $("tasks-sum").textContent = tasks.length ? [tn("tasks.count", tasks.length), tn("tasks.running", count("running")), t("tasks.waiting", { n: num(count("waiting")) })].join(" · ") : "";
   part("tasks", [tasks, actions && actions.tasks, board.panel && board.panel.ledgers], (box) => {
@@ -616,7 +637,6 @@ function render() {
 
 function drawAttention(box) {
   const tasks = board.tasks || [], items = [];
-  const openServices = () => { ui.open.add("services"); shown.more = ""; render(); const f = document.querySelector('[data-fold="services"]'); if (f) { f.scrollIntoView({ block: "start" }); focusKey("fold:services"); } };
   const link = (x) => { const a = el("a", null, x.key); a.href = "#" + anchor(x.dir); return a; };
   for (const x of tasks.filter((y) => y.needs_developer)) {
     const w = String(x.waiting_on || "").trim();
@@ -671,7 +691,7 @@ function drawAttention(box) {
       if (trouble.length > 1) { const ul = el("ul"); for (const l of trouble) add(ul, el("li", null, humanize(l))); add(li, ul); }
     }
     const go = el("button", "fold", t("attn.showControls")); go.type = "button"; go.dataset.fk = "svc-go:" + s.name;
-    go.addEventListener("click", openServices);
+    go.addEventListener("click", () => openService());
     add(li, add(el("div", "acts"), go));
     items.push(li);
   }
@@ -679,7 +699,7 @@ function drawAttention(box) {
   const slot = el("div", "attn-res");
   for (const k of Object.keys(ui.results).filter((x) => x.startsWith("attn:"))) add(slot, result(ui.results[k], k));
   if (!items.length) {
-    const running = tasks.flatMap((x) => x.agents || []).filter((a) => stateOf(a.state) === "running").length;
+    const running = tasks.flatMap(ownAgents).filter((a) => stateOf(a.state) === "running").length;
     const c = el("p", "calm");
     add(c, icon("ok"), t("calm.line", { running: running ? tn("calm.running", running) : t("calm.noneRunning"), word: machineWord(health) }));
     add(box, add(el("div", "calm-wrap"), slot, c)); return;
@@ -688,6 +708,14 @@ function drawAttention(box) {
   add(wrap, add(el("div", "sec-head"), el("h2", null, t("sec.needs")), el("span", "sum", num(items.length))));
   add(wrap, slot, add(el("ul", "attn-list"), ...items));
   add(box, wrap);
+}
+
+// Opens the services row and brings one service, or the row itself, into view.
+function openService(name) {
+  ui.open.add("services"); shown.more = ""; render();
+  const s = name !== undefined && $(svcAnchor(name)), f = document.querySelector('[data-fold="services"]');
+  if (s) s.scrollIntoView({ block: "start" }); else if (f) f.scrollIntoView({ block: "start" });
+  focusKey("fold:services");
 }
 
 function drawTask(x) {
@@ -715,8 +743,8 @@ function drawTask(x) {
     add(card, add(el("p", "waiting-on"), tnodes(mine ? "task.waitingYou" : "task.waitingOn", { what: document.createTextNode(mine ? w.replace(/^(developer|you)\s*:\s*/i, "") : w) }, true)));
   }
 
-  const agents = x.agents || [];
-  if (!agents.length) add(card, el("p", "empty", t("task.noAgents")));
+  const agents = ownAgents(x), loops = loopsOf(x);
+  if (!agents.length) { if (!loops.size) add(card, el("p", "empty", t("task.noAgents"))); }
   else {
     const counts = {}; for (const a of agents) counts[stateOf(a.state)] = (counts[stateOf(a.state)] || 0) + 1;
     const fin = agents.filter((a) => FINISHED.has(stateOf(a.state))).length;
@@ -739,6 +767,11 @@ function drawTask(x) {
     }
     add(card, cs);
     add(card, tree(agents, showAll));
+  }
+  for (const [name, n] of loops) {
+    const go = el("a", null, name); go.href = "#" + svcAnchor(name); go.dataset.fk = "loops:" + tk + ":" + name;
+    go.addEventListener("click", (e) => { e.preventDefault(); openService(name); });
+    add(card, add(el("p", "loops"), tnodes(pkey("task.loops", n), { n: num(n), name: go })));
   }
 
   const ledger = (board.panel && board.panel.ledgers && board.panel.ledgers[tk]) || [];
@@ -763,7 +796,7 @@ function drawTask(x) {
   // A result or an open question keeps the fold open, so it is never hidden behind the summary.
   const g = group("task:" + tk, acts, { task: tk }, t("task.acts"));
   if (g) { add(d, g); if (ui.results["task:" + tk] || acts.some((a) => ui.asking === actionKey(a, { task: tk }, "task:" + tk))) d.open = true; }
-  add(card, d);
+  add(card, d, el("p", "where", t("task.where")));
   return card;
 }
 
@@ -874,7 +907,7 @@ function meter(box, name, pair, fig, state, orphans) {
 }
 
 function drawService(s) {
-  const box = el("div", "svc");
+  const box = el("div", "svc"); box.id = svcAnchor(s.name);
   add(box, add(el("div", "svc-head"), el("b", null, s.name), el("span", "state-word " + (s.state || "unknown"), svcWord(s.state))));
   const det = (s.detail || []).filter(Boolean);
   if (det.length) { const ul = el("ul", "lines"); for (const line of det) add(ul, el("li", null, humanize(line))); add(box, ul); }
