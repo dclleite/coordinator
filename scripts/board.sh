@@ -101,7 +101,7 @@ while IFS= read -r d; do
       fi
       if [ "$F6" != "-" ] && [ -n "$F6" ]; then folder=$(basename "$F6"); else folder=$(basename "$F5"); fi
       text="$F1 · $F2 $F3 $F4 · $folder · $F11${lv:+ (live: $lv)}"
-      tree=$tree$(printf '%s\t%s\t%s' "$F8" "$F10" "$text")$'\n'
+      tree=$tree$(printf '%s\t%s\t%s\t%s' "$F8" "$F10" "$text" "$F11")$'\n'
       a=$(printf '{"role": %s, "provider": %s, "model": %s, "effort": %s, "repo": %s, "worktree": %s, "branch": %s, "thread": %s, "parent": %s, "state": %s, "live": %s}' \
         "$(j "$F1")" "$(j "$F2")" "$(j "$F3")" "$(j "$F4")" "$(j "$F5")" "$(j "$F6")" "$(j "$F7")" "$(j "$F8")" "$(j "$F10")" "$(j "$F11")" "$(j "$lv")")
       agents_json=${agents_json:+$agents_json, }$a
@@ -113,12 +113,18 @@ while IFS= read -r d; do
     printf 'Stage %s%s%s\n\n' "$stage" "$([ "$hold" = yes ] && printf ' · merge hold')" "${waiting:+ · waiting on: $waiting}"
     if [ -z "$tree" ]; then echo "- no agents"
     else
+      # A done or stopped agent is counted, not listed, unless an agent still going sits under it.
       printf '%s' "$tree" | awk -F'\t' '
-        { th[NR] = $1; pa[NR] = $2; tx[NR] = $3; by[$1] = NR }
+        { th[NR] = $1; pa[NR] = $2; tx[NR] = $3; by[$1] = NR; fin[NR] = ($4 == "done" || $4 == "stopped") }
+        function shown(i,   k) { if (i in sh) return sh[i]; sh[i] = !fin[i]
+          for (k = 1; k <= NR; k++) if (k != i && pa[k] == th[i] && shown(k)) sh[i] = 1
+          return sh[i] }
         function walk(i, dep,   k, p) { if (done[i]++) return; p = ""; for (k = 0; k < dep; k++) p = p "  "
-          print p "- " tx[i]; for (k = 1; k <= NR; k++) if (k != i && pa[k] == th[i]) walk(k, dep + 1) }
+          if (shown(i)) print p "- " tx[i]; else hid++
+          for (k = 1; k <= NR; k++) if (k != i && pa[k] == th[i]) walk(k, dep + 1) }
         END { for (i = 1; i <= NR; i++) if (pa[i] == "-" || !(pa[i] in by) || pa[i] == th[i]) walk(i, 0)
-              for (i = 1; i <= NR; i++) walk(i, 0) }'
+              for (i = 1; i <= NR; i++) walk(i, 0)
+              if (hid) print "- " hid " more done or stopped (board.json lists them)" }'
     fi
   } >> "$parts/running"
 
@@ -186,11 +192,11 @@ problems_json=$(paste -sd, "$parts/problems.json" 2>/dev/null)
       $1 == "verdict" { print "Verdict: " $2 } $1 == "name" { flush(); n = $2; v = ""; l = ""; s = "" }
       $1 == "value" { v = $2 } $1 == "limit" { l = $2 } $1 == "state" { s = $2 } END { flush() }'
   else echo "Verdict: unknown (no health reading)"; fi
+  # The counts are health.sh readings already; what only sweep.sh tells is how many no open task owns.
   if [ -n "$resources" ]; then
     printf '%s' "$resources" | json_pairs | awk -F'\t' '
-      function flush() { if (k != "") print "- " k ": " c (l == "" ? "" : " of " l) " " s }
-      $1 == "kind" { flush(); k = $2; c = ""; l = ""; s = "" } $1 == "count" { c = $2 } $1 == "limit" { l = $2 }
-      $1 == "state" { s = $2 } END { flush() }'
+      function flush() { if (k != "" && o > 0) print "- " k ": " o " not owned by an open task (sweep.sh --orphans lists them)" }
+      $1 == "kind" { flush(); k = $2; o = 0 } $1 == "orphans" { o++ } END { flush() }'
   fi
   echo; echo "## Problems"; echo
   if [ -s "$parts/problems" ]; then cat "$parts/problems"; else echo "None."; fi

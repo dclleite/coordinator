@@ -43,6 +43,18 @@ ok "problem: done but open" grep -q '^- stage-done-open: ABC-123: stage is done 
 fails 1 "no stale agent yet" grep -q 'stale-agent' "$M"
 ok "live empty without --live" grep -qF '"state": "running", "live": ""' "$J"
 eq "sections in order" "Needs you|Running|Finished, not yet seen|Services|Machine|Problems" "$(sed -n 's/^## //p' "$M" | paste -sd'|' -)"
+# Done and stopped agents are counted under Running, not listed, unless an agent still going is under one.
+E=$($S/task-new.sh personal - finished "Finished agents")
+$S/agent-add.sh "$E" sub-coordinator codex m medium "$PE/app" - - thr_esub; $S/agent-set.sh "$E" thr_esub state done
+$S/agent-add.sh "$E" worker codex m low "$PE/app" - - thr_e1 thr_esub
+$S/agent-add.sh "$E" worker codex m low "$PE/app" - - thr_d1; $S/agent-set.sh "$E" thr_d1 state done
+$S/agent-add.sh "$E" worker codex m low "$PE/app" - - thr_d2 thr_d1; $S/agent-set.sh "$E" thr_d2 state stopped
+$S/board.sh
+ok "a done parent of running agents stays" grep -q '^- sub-coordinator · codex m medium · app · done$' "$M"
+ok "finished agents counted" grep -q '^- 2 more done or stopped (board.json lists them)$' "$M"
+fails 1 "a finished agent alone is not listed" grep -q ' · stopped$' "$M"
+ok "finished agents still in JSON" grep -qF '"thread": "thr_d2", "parent": "thr_d1", "state": "stopped"' "$J"
+$S/task-set.sh "$E" status closed
 if [ "$have_py" = yes ]; then
   eq "task fields" "quotes personal open intake unknown False False" "$(jget '" ".join(str(t[k]) for t in d["tasks"] if t["key"]=="quotes" for k in ["key","scope","status","stage","complexity","needs_developer","hold_merge"])')"
   eq "four agents" 4 "$(jget 'len([t for t in d["tasks"] if t["key"]=="quotes"][0]["agents"])')"
@@ -72,7 +84,7 @@ F
 cat > "$T/tools/sweep.sh" <<'F'
 #!/bin/bash
 [ "$*" = "--orphans --json" ] || exit 2
-echo '[{"kind": "browser", "count": "2", "limit": "3", "state": "ok"}]'
+echo '[{"kind": "browser", "count": "2", "limit": "3", "state": "ok", "orphans": ["p1", "p2"]}, {"kind": "worktrees", "count": "1", "limit": "9", "state": "ok", "orphans": []}]'
 F
 chmod +x "$T/tools"/*.sh
 COORD_TOOLS=$T/tools $S/board.sh
@@ -84,7 +96,9 @@ ok "service on the board" grep -qF -- '- bot: ok · http://127.0.0.1:9999 · ver
 ok "service detail" grep -q '^  - watcher up$' "$M"
 ok "machine verdict" grep -q '^Verdict: unhealthy$' "$M"
 ok "machine reading" grep -q '^- disk_free_gb: 9 (limit 15) LOW$' "$M"
-ok "resource line" grep -q '^- browser: 2 of 3 ok$' "$M"
+ok "orphans on the board" grep -q '^- browser: 2 not owned by an open task (sweep.sh --orphans lists them)$' "$M"
+fails 1 "no line for a kind without orphans" grep -q '^- worktrees' "$M"
+fails 1 "counts not repeated after the health readings" grep -q ' of 3 ok$' "$M"
 
 # An input that answers something else counts as missing.
 printf '#!/bin/bash\necho "not json"\n' > "$T/tools/service.sh"
