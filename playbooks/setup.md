@@ -8,6 +8,7 @@ Run by any agent the person opens on this folder after a fresh clone or a wiped 
 Run `scripts/setup.sh`, and `scripts/setup.sh --check` after it.
 Keep its `decide:` lines: they are the agenda below.
 It runs `scripts/providers.sh detect --write`, which adds the agent programs it finds (copies off PATH included) to `.private/config/providers.tsv` with account `unknown`; an existing row's account is never changed. `detect` only notes local model servers that already answer; it never starts one.
+A line `<tool>: found at <path>, not on PATH` ends with the line to add to the shell profile: pass it to the person, never edit the profile.
 If it says the git config could not be written, the person runs the command it printed; do not work around it.
 
 ## 2. Ask once
@@ -21,7 +22,7 @@ Put every open decision in one message, each with what the script found and your
 - **Launch templates.** A provider whose `launch` column is `-` cannot be started by `dispatch.sh launch` in a plain terminal; propose the template from its `--help`, never a guessed flag.
 - **The reaper.** Whether to install the one scheduled job: `scripts/reap.sh install` (on Linux it prints the cron line to add), `scripts/reap.sh --dry-run` first to show what it would do, `scripts/reap.sh uninstall` to remove it. Its ages and limits are in `config/health.conf`. Never install it without the person's yes.
 - **What a scope accepts.** Only when the routing table has a scope other than the ones in `config/scopes.example.tsv`: which account kinds `.private/config/scopes.tsv` should let in.
-- **The private terms.** The script seeded what it could discover and never printed it. Ask for what it cannot know: the company's names, people, repository names, internal hosts and the ticket prefix. They go one per line into `.private/sensitive-terms.txt`.
+- **The private terms.** Only while the script asks for them: it stops once the list holds a term it did not discover itself. The script seeded what it could discover and never printed it. Ask for what it cannot know: the company's names, people, repository names, internal hosts and the ticket prefix. They go one per line into `.private/sensitive-terms.txt`.
 
 Do not show the seeded terms back, and do not read company code to find terms.
 

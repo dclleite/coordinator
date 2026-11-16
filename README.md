@@ -39,7 +39,8 @@ Requirements: bash 3.2 or later, git, the usual POSIX tools and `shasum` or `sha
 Optional: Python 3 (only for the panel), Docker (container readings), the T3 Code app (`runtimes/t3.md`), a browser automation tool (`scripts/browser.sh` wraps it), and at least one agent CLI.
 
 `setup.sh` creates the private folder `.private/` from the tracked examples in `config/`, points git at the tracked `hooks/`, seeds the private term list with what the machine can tell (your user name, home path, host name, git identity, routed folders and their remotes), detects the installed providers, and ends with `decide:` lines.
-Those are the decisions only you can make: which folders are company, which account each provider is signed in with, and the private terms it cannot discover.
+Those are the decisions only you can make: which folders are company, which account each provider is signed in with, and the private terms it cannot discover (asked until the list holds one term setup did not discover itself).
+A tool installed in a known place outside PATH (such as `~/.t3/bin`) is found and used, and setup prints the line to add to your shell profile; it never edits the profile.
 If the agent running setup is sandboxed and cannot write the git config, setup prints the command for you to run.
 
 Then open the folder in your agent and say "set up the coordinator": the `coordinator-setup` skill (in `.agents/skills/` and `.claude/skills/`) runs the script and asks you those decisions in one message, following `playbooks/setup.md`.
