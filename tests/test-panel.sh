@@ -522,6 +522,9 @@ eq "a key the table lacks is English" "C en" "$(locale 'd["strings"]["c"]')"
 eq "a key the table leaves empty is English" "B en" "$(locale 'd["strings"]["b"]')"
 fails 1 "a table's text cannot close the page's script" grep -qF '</script><script>alert' "$W/body"
 fails 1 "nor add markup" grep -qF '<b>&' "$W/body"
+ok "the locale block holds no raw <, > or &" python3 -c 'import re,sys
+b = re.search(r"id=.panel-locale.>(.*?)</script>", open(sys.argv[1]).read(), re.S).group(1)
+sys.exit(1 if re.search("[<>&]", b) else 0)' "$W/body"
 eq "it reaches the page as the same text" "<b>&</b>" "$(locale 'd["strings"]["x"]')"
 rm "$W/loc/pt-BR.json"; req GET "/?key=testkey" >/dev/null
 eq "a table removed while running falls back to English" "en A en" "$(locale 'd["lang"] + " " + d["strings"]["a"]')"
