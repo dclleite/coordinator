@@ -172,7 +172,7 @@ code, .cmd { font-family: var(--mono); font-size: 0.92em; background: var(--sunk
 .res { border-radius: 8px; border: 1px solid var(--line); background: var(--sunk); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; font-size: var(--s2); }
 .res.fail { border-color: var(--bad); background: var(--bad-soft); }
 .res-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
-.res-head .grow { min-width: 0; }
+.res-head .grow { min-width: min(100%, 16em); }
 .res pre { margin: 0; max-height: 240px; overflow: auto; font: var(--s1)/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
 
 /* Folded detail: one row per topic, its summary says enough to decide whether to open it. */
@@ -300,6 +300,8 @@ function actionLabel(a) {
   const k = "action." + a.id + ".label";
   return has(k) ? t(k, { verb: a.verb || "", what: itemsText(a.items) }) : a.label;
 }
+// Where the button's own words carry details the question already lists, the question and the result use the short form.
+function shortLabel(a) { const k = "action." + a.id + ".short"; return has(k) ? t(k) : actionLabel(a); }
 // What a button stops, counted per kind in the order the server listed them: "2 browsers, 1 container".
 function kindCount(kind, n) { return has("kind." + kind + ".other") ? tn("kind." + kind, n) : num(n) + " " + readingName(kind).toLowerCase(); }
 function itemsText(items) {
@@ -507,7 +509,7 @@ function button(a, target, gkey) {
   return b;
 }
 function ask(a, target, gkey) {
-  const key = actionKey(a, target, gkey), label = actionLabel(a);
+  const key = actionKey(a, target, gkey), label = shortLabel(a);
   const box = el("div", "ask"); box.tabIndex = -1; box.dataset.fk = "ask:" + key;
   box.setAttribute("role", "group"); box.setAttribute("aria-label", t("ask.label", { action: label }));
   const q = target.task ? t("ask.q.task", { action: label, target: keyOf(target.task) })
@@ -579,7 +581,7 @@ function result(r, gkey) {
   return box;
 }
 async function press(a, target, confirmed, gkey) {
-  const key = actionKey(a, target, gkey), label = actionLabel(a);
+  const key = actionKey(a, target, gkey), label = shortLabel(a);
   ui.running = key; delete ui.results[gkey]; render();
   if (!focusKey(key)) focusKey("choose:" + gkey);
   const body = { id: a.id, task: target.task || "", service: target.service || "", verb: target.verb || "", until: target.until || "", confirmed };

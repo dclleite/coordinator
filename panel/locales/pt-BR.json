@@ -70,6 +70,7 @@
   "action.hold-on.label": "Bloquear merge desta tarefa",
   "action.hold-off.label": "Liberar merge desta tarefa",
   "action.sweep-task.label": "Parar o que esta tarefa deixou rodando ({what})",
+  "action.sweep-task.short": "Parar o que esta tarefa deixou rodando",
   "action.service-verb.label": "Rodar {verb}",
   "action.hold-on.hint": "Nenhum agente faz merge desta tarefa enquanto estiver bloqueado.",
   "action.hold-off.hint": "Nenhum agente faz merge desta tarefa enquanto estiver bloqueado.",

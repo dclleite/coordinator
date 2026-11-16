@@ -70,6 +70,7 @@
   "action.hold-on.label": "Hold merges of this task",
   "action.hold-off.label": "Lift this task's merge hold",
   "action.sweep-task.label": "Stop what this task left running ({what})",
+  "action.sweep-task.short": "Stop what this task left running",
   "action.service-verb.label": "Run {verb}",
   "action.hold-on.hint": "No agent merges this task while it is held.",
   "action.hold-off.hint": "No agent merges this task while it is held.",

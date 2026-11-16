@@ -143,7 +143,7 @@ dynamic = {
     "stage.": stages + ["unknown"],
     "svcstate.": ["ok", "degraded", "down", "unknown"],
     "loopstate.": re.search(r"every \(\\d\+\) \?s\(\?:: \(([a-z|]+)\)", script).group(1).split("|"),
-    "action.": [a + s for a in actions for s in (".label", ".note", ".hint")],
+    "action.": [a + s for a in actions for s in (".label", ".note", ".hint", ".short")],
     "kind.": [k + s for k in kinds for s in (".one", ".other")],
     "server.": sorted(codes),
     "reading.": re.findall(r"^report ([a-z_]+) ", health, re.M) + kinds,
