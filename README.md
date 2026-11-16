@@ -55,9 +55,12 @@ The same board is written to `.private/board.md` and `.private/board.json` for a
 ## The panel
 
 `scripts/panel.sh start` serves the board as a page on this machine and prints its address with a key (the page opens only from that address; `panel.sh url` prints it again); `panel.sh status` says whether it runs and `panel.sh stop` ends it.
-The page reads top to bottom: what needs you (tasks waiting on you, handoffs not yet read, merge holds, an unhealthy machine, a service that is down), or one calm line when nothing does; then each open task with its stage and its tree of agents, where every state has its own shape and word and finished agents fold into a count; then one folded row each for services, the machine, cleanup, record problems, closed tasks and the panel itself.
+The page reads top to bottom: what needs you (tasks waiting on you, handoffs not yet read, merge holds, an unhealthy machine, a service that is down or whose status names a stalled or failing loop), or one calm line when nothing does; then each open task with its stage and its tree of agents, where every state has its own shape and word and finished agents fold into a count; then one folded row each for services, the machine, cleanup, record problems, closed tasks and the panel itself.
 It refreshes while its tab is visible, and says plainly when the board is old or the server has stopped.
-Its buttons run a fixed list of actions (`config/panel-actions.tsv`) and sit next to what they act on: an `auto` action runs at once and shows its result in place; a `confirm` action (its label ends in "…") first asks in the page, naming the command, and the server refuses it without that answer; a `never` action is not offered.
+Its buttons run a fixed list of actions (`config/panel-actions.tsv`) and sit next to what they act on (a task's own actions in its "Details, ledger and actions" fold): an `auto` action runs at once and shows its result in place; a `confirm` action (its label ends in "…" and carries an "asks first" mark) first asks in the page, naming the command, and the server refuses it without that answer; a `never` action is not offered.
+The server runs one press of an action on a target at a time and refuses a second while the first runs; every press, run or refused, is a line in `.private/panel/log`.
+"Mark them as read" marks only the handoffs the page listed; one that arrived after the page last refreshed stays unread.
+The panel in use is not a leftover for the cleanup; it becomes one only once idle past twice its idle time.
 It listens on `127.0.0.1` only, with a fresh key per start that the page and every API request must carry, and refuses requests from any other site.
 It exits by itself after `PANEL_IDLE_MIN` minutes without a request (`config/panel.conf`); if it did not, `reap.sh` stops it after twice that time. It is never started at login.
 It needs Python 3; without it, `scripts/status.sh` still prints the board.
@@ -114,7 +117,8 @@ Kept for good: task records and handoffs, the only durable context.
 ## Registering a service
 
 A service is something long-running that is not a task, such as a team bot.
-Describe it in `.private/services/<name>.conf` (see `config/services.example.conf`): its scope, a status command, its verbs with a class (`auto`, or `confirm` for anything that needs your word), the threads and folders that belong to it, and its own panel's address.
+Describe it in `.private/services/<name>.conf` (see `config/services.example.conf`): its scope, a status command, its verbs with a class (`auto`, or `confirm` for anything that needs your word) and, if you like, a `verb.<v>.label=` line saying in plain words what each does, the threads and folders that belong to it, and its own panel's address.
+On the panel, more than two verbs whose names start with `restart` sit behind one "Restart…" choice.
 `scripts/service.sh status --all` shows every service on the board, `scripts/service.sh run <name> <verb>` runs a verb, and cleanup never touches what a service protects.
 Nothing that names the service is tracked; put its names in the private term list.
 

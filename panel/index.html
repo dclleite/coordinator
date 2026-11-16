@@ -77,7 +77,10 @@ code, .cmd { font-family: var(--mono); font-size: 0.92em; background: var(--sunk
 .attn-item .what { font-weight: 600; font-size: var(--s4); line-height: 1.35; overflow-wrap: anywhere; }
 .attn-item .ctx { color: var(--ink-2); font-size: var(--s2); overflow-wrap: anywhere; }
 .attn-item .ctx a { font-weight: 600; }
-.attn-item .acts, .attn-item .res, .attn-item .ask, .attn-item ul { grid-column: 2; }
+.attn-item .acts, .attn-item .res, .attn-item .ask, .attn-item ul, .attn-item .grp { grid-column: 2; }
+.attn-res { display: flex; flex-direction: column; gap: 8px; padding: 6px 16px 10px; }
+.attn-res:empty { display: none; }
+.calm-wrap { display: flex; flex-direction: column; gap: 8px; }
 .attn-item ul { margin: 4px 0 0; padding-left: 18px; font-size: var(--s2); color: var(--ink-2); }
 .calm { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink-2); }
 .calm .ic { color: var(--good); }
@@ -101,7 +104,7 @@ code, .cmd { font-family: var(--mono); font-size: 0.92em; background: var(--sunk
 .sg.failed::before, .sg.failed::after { content: ""; position: absolute; left: 4px; top: -1px; width: 2.5px; height: 12px; background: var(--bad); transform: rotate(45deg); }
 .sg.failed::after { transform: rotate(-45deg); }
 .sg.stopped { background: var(--neutral); border-radius: 1px; transform: scale(0.85); }
-.sg.unknown { border: 2px dashed var(--neutral); border-radius: 50%; }
+.sg.unknown::before { content: ""; position: absolute; left: 1px; right: 1px; top: 4px; height: 2px; border-radius: 1px; background: var(--neutral); }
 .st.running { color: var(--accent); } .st.waiting { color: var(--warn); } .st.done { color: var(--good); }
 .st.failed { color: var(--bad); font-weight: 600; } .st.stopped, .st.unknown { color: var(--muted); }
 @media (prefers-reduced-motion: no-preference) {
@@ -128,27 +131,29 @@ code, .cmd { font-family: var(--mono); font-size: 0.92em; background: var(--sunk
 .stage b { font-weight: 600; color: var(--ink); }
 .waiting-on { font-size: var(--s3); color: var(--ink-2); overflow-wrap: anywhere; margin: 0; }
 .waiting-on span { color: var(--muted); }
-.counts { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.counts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.counts .fold { margin-left: 2px; }
+.counts .unrec { font-size: var(--s2); color: var(--muted); }
 
 .tree, .tree ul { list-style: none; margin: 0; padding: 0; }
 .tree { border-top: 1px solid var(--line); }
 .tree ul { margin-left: 5px; padding-left: 16px; border-left: 1px solid var(--line-strong); }
-.ag-row { display: grid; grid-template-columns: 7.2em 8.5em minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.ag-row { display: grid; grid-template-columns: 7.2em 8.5em minmax(0, 26em) minmax(0, 1fr); gap: 2px 12px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); min-width: 0; }
 .ag-role { font-weight: 600; font-size: var(--s2); }
 .ag-where { font-family: var(--mono); font-size: var(--s1); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.ag-model { font-size: var(--s1); color: var(--muted); white-space: nowrap; }
+.ag-model { font-size: var(--s1); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ag-live { font-size: var(--s1); color: var(--muted); }
 .fold { align-self: flex-start; background: none; border: 0; padding: 2px 0; color: var(--accent); cursor: pointer; font-size: var(--s2); text-decoration: underline; text-underline-offset: 3px; }
 .empty { color: var(--muted); font-size: var(--s2); margin: 0; }
 
-/* Actions: auto is a plain button; confirm carries a trailing "…" and a warm edge, and asks in the page first. */
+/* Actions: auto is a plain button; confirm is drawn the same, with a trailing "…" and an "asks first" mark. Amber is kept for what needs you. */
 .acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .acts .lbl { font-size: var(--s1); color: var(--muted); width: 100%; }
 .btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 12px; border-radius: 7px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font-size: var(--s2); font-weight: 550; cursor: pointer; max-width: 100%; text-align: left; overflow-wrap: anywhere; }
 .btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .btn:disabled { opacity: 0.5; cursor: default; }
-.btn.confirm { border-color: var(--attn-line); background: var(--attn-soft); color: var(--attn-ink); }
-.btn.confirm:hover:not(:disabled) { border-color: var(--attn); color: var(--attn-ink); }
+.btn[aria-disabled="true"] { cursor: progress; }
+.btn .asks { font-size: 11px; font-weight: 500; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; line-height: 16px; white-space: nowrap; }
 .btn.primary { background: var(--attn); border-color: var(--attn); color: var(--surface); }
 .btn.primary:hover:not(:disabled) { color: var(--surface); filter: brightness(1.08); }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--ink-2); }
@@ -204,6 +209,7 @@ code, .cmd { font-family: var(--mono); font-size: 0.92em; background: var(--sunk
 .facts dd { margin: 0; overflow-wrap: anywhere; }
 .task details.more-t > summary { cursor: pointer; font-size: var(--s2); color: var(--accent); width: max-content; max-width: 100%; }
 .task details.more-t[open] > summary { margin-bottom: 8px; }
+.task details.more-t > .grp { margin-top: 12px; }
 
 @media (max-width: 640px) {
   main { gap: 22px; padding-top: 14px; }
@@ -258,8 +264,14 @@ const $ = (id) => document.getElementById(id);
 
 let board = null, actions = null, timer = null, ticking = false, again = false, lastOk = 0;
 let gone = "";            // "", "down", "key", "stopped": why the page no longer reflects the server
+// What an action does beyond its label, said in its question; the result of these is shown open.
+const NOTES = {
+  "sweep-task": "What this task recorded and can be stopped without asking is stopped; anything marked to ask first is kept and listed in the result.",
+};
+const OPEN_OUTPUT = new Set(["inbox-seen", "sweep-task", "reap-preview", "reap"]);
 const ui = {
   asking: null,           // key of the confirm action whose question is open
+  choosing: null,         // group key whose "Restart…" choice is open
   running: null,          // key of the action being run; every action button waits for it
   results: {},            // group key -> result of the last press in that group
   open: new Set(),        // folded rows the person opened
@@ -292,6 +304,39 @@ function shortTime(t) { const d = new Date(t); return isNaN(d) ? String(t || "")
 function nice(name) { return String(name).replace(/^resource\./, "").replace(/_(gb|pct)$/, "").replace(/^mem_/, "memory_").replace(/[_-]+/g, " ").replace(/^./, (c) => c.toUpperCase()); }
 function safeUrl(u) { try { const x = new URL(u); return (x.protocol === "http:" || x.protocol === "https:") ? x.href : null; } catch (e) { return null; } }
 function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+function dur(n) {
+  n = Math.max(0, Math.round(n));
+  if (n < 60) return n + " s"; if (n < 3600) return Math.round(n / 60) + " min";
+  if (n < 172800) return Math.round(n / 3600) + " h"; return Math.round(n / 86400) + " days";
+}
+// A service or a reading counts in seconds; people read "11 h ago, expected every 30 min".
+function humanize(t) {
+  return String(t).replace(/\bevery (\d+) ?s\b/g, (_, n) => "expected every " + dur(+n))
+    .replace(/\b(\d+) ?s ago\b/g, (_, n) => dur(+n) + " ago").replace(/\b(\d+)s\b/g, (_, n) => dur(+n));
+}
+// A degraded service whose status names a stalled or failing loop needs the developer.
+function loopTrouble(s) { return s.state === "degraded" ? (s.detail || []).filter((l) => /\b(stalled|failing|error)\b/i.test(l)) : []; }
+function taskOf(rel) { return (board.tasks || []).find((t) => taskKey(t.dir) === rel); }
+function keyOf(rel) { const t = taskOf(rel); return t ? t.key : base(rel); }
+// The machine's verdict in words, from its readings; the raw verdict only when no reading explains it.
+function machineIssues(h) {
+  const out = [];
+  for (const r of (h && h.readings) || []) {
+    const n = r.name, v = r.value, l = r.limit;
+    if (n === "disk_free_gb") { if (r.state === "unknown") out.push("Free disk space could not be read"); else if (r.state !== "ok") out.push("Disk free " + v + " GB, it should keep " + l + " GB"); }
+    else if (n === "mem_free_pct") { if (r.state === "unknown") out.push("Free memory could not be read"); else if (r.state !== "ok") out.push("Memory free " + v + "%, it should keep " + l + "%"); }
+    else if (r.state !== "ok" && r.state !== "unknown") out.push(nice(n) + ": " + v + ", the limit is " + l);
+  }
+  const v = String((h && h.verdict) || "");
+  if (!out.length && /^unhealthy/.test(v)) out.push(v.replace(/^unhealthy:\s*/, ""));
+  return out;
+}
+function machineWord(h) {
+  const v = String((h && h.verdict) || "unknown");
+  if (v === "healthy") return "healthy";
+  if (/^unhealthy/.test(v)) return "short on room";
+  return "not read (no health reading)";
+}
 function announce(text) { $("announce").textContent = ""; setTimeout(() => { $("announce").textContent = text; }, 30); }
 
 async function api(path, body) {
@@ -309,6 +354,7 @@ function showGone(why) {
   const g = $("gone"); g.replaceChildren(); g.hidden = !why;
   $("main").classList.toggle("stale", !!why);
   $("main").inert = !!why;
+  $("live").disabled = !!why;
   if (!why) return;
   const since = lastOk ? " What you see below is from " + clock(new Date(lastOk)) + "." : "";
   if (why === "key") {
@@ -363,7 +409,8 @@ function taskActs(dir) { const k = taskKey(dir); const t = actions && actions.ta
 function svcActs(name) { const s = actions && actions.services.find((x) => x.service === name); return s ? s.actions : []; }
 
 // One group of buttons for one thing, with its question and its last result drawn right where it was pressed.
-function group(gkey, list, target, label) {
+// Inside "Needs you" the result goes to the section's own slot instead (inResult false): the item may leave on refresh.
+function group(gkey, list, target, label, inResult) {
   const box = el("div", "grp");
   box.style.display = "flex"; box.style.flexDirection = "column"; box.style.gap = "8px";
   const asking = list.find((a) => ui.asking === actionKey(a, target, gkey));
@@ -375,8 +422,15 @@ function group(gkey, list, target, label) {
     add(box, row);
   }
   const r = ui.results[gkey];
-  if (r) add(box, result(r, gkey));
+  if (r && inResult !== false) add(box, result(r, gkey));
   return box.childNodes.length ? box : null;
+}
+function asksMark() { return el("span", "asks", "asks first"); }
+// The running button stays focusable (aria-disabled), so focus does not fall to the page while it runs.
+function guardButton(b, key) {
+  const mine = !!ui.running && ui.running === key;
+  b.disabled = !!gone || (!!ui.running && !mine);
+  if (mine) b.setAttribute("aria-disabled", "true");
 }
 function button(a, target, gkey) {
   const key = actionKey(a, target, gkey);
@@ -385,11 +439,11 @@ function button(a, target, gkey) {
   b.dataset.fk = key;
   b.title = (confirm ? "Asks first, then runs: " : "Runs at once: ") + a.command;
   if (ui.running === key) add(b, add(el("span", "spin"), ""), "Running…");
-  else add(b, a.label + (confirm ? "…" : ""));
-  b.disabled = !!ui.running || !!gone;
+  else { add(b, a.label + (confirm ? "…" : "")); if (confirm) add(b, asksMark()); }
+  guardButton(b, key);
   b.addEventListener("click", () => {
-    if (ui.running) return;
-    if (confirm) { ui.asking = key; ui.returnFocus = key; delete ui.results[gkey]; render(); focusKey("ask:" + key); }
+    if (ui.running || gone) return;
+    if (confirm) { ui.asking = key; ui.choosing = null; ui.returnFocus = key; delete ui.results[gkey]; render(); focusKey("ask:" + key); }
     else press(a, target, false, gkey);
   });
   return b;
@@ -398,30 +452,63 @@ function ask(a, target, gkey) {
   const key = actionKey(a, target, gkey);
   const box = el("div", "ask"); box.tabIndex = -1; box.dataset.fk = "ask:" + key;
   box.setAttribute("role", "group"); box.setAttribute("aria-label", "Confirm: " + a.label);
-  const what = target.task ? " for " + target.task : target.service ? " on " + target.service : "";
+  const what = target.task ? " for " + keyOf(target.task) : target.service ? " on " + target.service : "";
   add(box, el("div", "q", a.label + what + "?"));
-  add(box, add(el("div", "d"), "This runs ", el("code", null, a.command), ". Nothing is sent until you press the button below."));
+  add(box, add(el("div", "d"), "This runs ", el("code", null, a.command), ". " + (NOTES[a.id] ? NOTES[a.id] + " " : "") + "Nothing is sent until you press the button below."));
   const row = el("div", "acts");
   const go = el("button", "btn primary", "Yes, " + a.label.charAt(0).toLowerCase() + a.label.slice(1)); go.type = "button"; go.dataset.fk = "go:" + key;
   go.disabled = !!ui.running || !!gone;
-  go.addEventListener("click", () => { ui.asking = null; press(a, target, true, gkey); });
+  go.addEventListener("click", () => { if (ui.running || gone) return; ui.asking = null; press(a, target, true, gkey); });
   const no = el("button", "btn quiet", "Cancel"); no.type = "button"; no.dataset.fk = "no:" + key;
   no.addEventListener("click", cancelAsk);
   box.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); cancelAsk(); } });
   return add(box, add(row, go, no));
 }
 function cancelAsk() { const back = ui.returnFocus; ui.asking = null; render(); if (back) focusKey(back); }
+// More than two restart verbs sit behind one "Restart…" choice; picking one opens its usual question.
+function chooseButton(list, target, gkey) {
+  const b = el("button", "btn confirm"); b.type = "button"; b.dataset.fk = "choose:" + gkey;
+  const runs = list.some((a) => ui.running === actionKey(a, target(a), gkey));
+  b.title = "Asks which part, then asks before it runs";
+  if (runs) add(b, add(el("span", "spin"), ""), "Running…"); else add(b, "Restart…", asksMark());
+  b.disabled = !!gone || (!!ui.running && !runs);
+  if (runs) b.setAttribute("aria-disabled", "true");
+  b.addEventListener("click", () => { if (ui.running || gone) return; ui.choosing = gkey; ui.asking = null; delete ui.results[gkey]; render(); focusKey("pick:" + gkey); });
+  return b;
+}
+function chooser(list, target, gkey) {
+  const box = el("div", "ask"); box.tabIndex = -1; box.dataset.fk = "pick:" + gkey;
+  box.setAttribute("role", "group"); box.setAttribute("aria-label", "Restart which part?");
+  add(box, el("div", "q", "Restart which part?"), el("div", "d", "Each one asks again before it runs."));
+  const row = el("div", "acts");
+  for (const a of list) {
+    const key = actionKey(a, target(a), gkey);
+    const b = el("button", "btn confirm"); b.type = "button"; b.dataset.fk = "opt:" + key; b.title = "Asks first, then runs: " + a.command;
+    add(b, a.label + "…");
+    b.disabled = !!ui.running || !!gone;
+    b.addEventListener("click", () => { if (ui.running || gone) return; ui.choosing = null; ui.asking = key; ui.returnFocus = "choose:" + gkey; render(); focusKey("ask:" + key); });
+    add(row, b);
+  }
+  const no = el("button", "btn quiet", "Cancel"); no.type = "button"; no.dataset.fk = "nopick:" + gkey;
+  const close = () => { ui.choosing = null; render(); focusKey("choose:" + gkey); };
+  no.addEventListener("click", close);
+  box.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } });
+  return add(box, add(row, no));
+}
 function result(r, gkey) {
   const box = el("div", "res" + (r.ok ? "" : " fail")); box.setAttribute("role", "status");
+  box.tabIndex = -1; box.dataset.fk = "res:" + gkey;
   const head = el("div", "res-head");
-  const word = r.ok ? "Done" : r.status === 200 ? "Failed, exit " + r.exit : r.status ? "Refused (" + r.status + ")" : "No answer from the panel";
+  const word = r.ok ? "Done" : r.status === 200 ? "Failed, exit " + r.exit : r.status === 409 ? "Already running" : r.status ? "Refused (" + r.status + ")" : "No answer from the panel";
   add(head, add(el("span", "st " + (r.ok ? "done" : "failed")), add(el("span", "sg " + (r.ok ? "done" : "failed")), ""), word),
     add(el("span", "grow"), r.label), el("span", "empty", clock(r.at)));
   const x = el("button", "btn quiet", "Dismiss"); x.type = "button"; x.dataset.fk = "dismiss:" + gkey;
   x.addEventListener("click", () => { delete ui.results[gkey]; render(); });
   add(box, add(head, x));
   if (r.text) {
-    if (r.ok && r.text.split("\n").length > 4) {
+    const kept = r.id === "sweep-task" ? r.text.split("\n").filter((l) => /: kept\b/.test(l)).length : 0;
+    if (kept) add(box, el("p", "empty", plural(kept, "thing") + " kept: each asks first, and the panel never stops those."));
+    if (r.ok && !OPEN_OUTPUT.has(r.id) && r.text.split("\n").length > 4) {
       const d = el("details"); add(d, el("summary", null, "Output"), el("pre", null, r.text)); add(box, d);
     } else add(box, el("pre", null, r.text));
   }
@@ -429,15 +516,16 @@ function result(r, gkey) {
 }
 async function press(a, target, confirmed, gkey) {
   const key = actionKey(a, target, gkey);
-  ui.running = key; delete ui.results[gkey]; render(); focusKey(key);
-  const body = { id: a.id, task: target.task || "", service: target.service || "", verb: target.verb || "", confirmed };
+  ui.running = key; delete ui.results[gkey]; render();
+  if (!focusKey(key)) focusKey("choose:" + gkey);
+  const body = { id: a.id, task: target.task || "", service: target.service || "", verb: target.verb || "", until: target.until || "", confirmed };
   let r;
   try { r = await api("/api/run", body); } catch (e) { r = { status: 0, json: null }; }
   ui.running = null;
   if (r.status === 428) { ui.asking = key; render(); focusKey("ask:" + key); return; }
   const ok = r.status === 200 && r.json && r.json.exit === 0;
   const text = r.json ? (r.json.output !== undefined ? r.json.output : r.json.error) : "";
-  ui.results[gkey] = { ok, status: r.status, exit: r.json && r.json.exit, label: a.label, text: (text || "").trim(), at: new Date() };
+  ui.results[gkey] = { ok, id: a.id, status: r.status, exit: r.json && r.json.exit, label: a.label, text: (text || "").trim(), at: new Date() };
   announce(a.label + (ok ? ": done" : ": failed"));
   if (a.id === "panel-stop" && ok) { clearTimeout(timer); showGone("stopped"); return; }
   render(); focusKey("dismiss:" + gkey);
@@ -446,10 +534,10 @@ async function press(a, target, confirmed, gkey) {
 
 /* ---------- drawing ---------- */
 const shown = {};
-function focusKey(k) { const e = document.querySelector('[data-fk="' + CSS.escape(k) + '"]'); if (e) e.focus({ preventScroll: false }); }
+function focusKey(k) { const e = document.querySelector('[data-fk="' + CSS.escape(k) + '"]'); if (e) e.focus({ preventScroll: false }); return !!e && document.activeElement === e; }
 // A part is redrawn only when its input changed; focus and opened folds survive the redraw.
 function part(id, input, draw) {
-  const sig = JSON.stringify(input) + JSON.stringify([ui.asking, ui.running, Object.keys(ui.results).map((k) => [k, ui.results[k].at]), [...ui.expanded], [...ui.frames], gone]);
+  const sig = JSON.stringify(input) + JSON.stringify([ui.asking, ui.choosing, ui.running, Object.keys(ui.results).map((k) => [k, ui.results[k].at]), [...ui.expanded], [...ui.frames], gone]);
   if (shown[id] === sig) return;
   shown[id] = sig;
   const box = $(id);
@@ -470,8 +558,8 @@ function fold(key, name, summary, sumCls, fill) {
 function render() {
   if (!board) return;
   const tasks = board.tasks || [], services = board.services || [], health = board.health || {};
-  part("attn", [tasks.map((t) => [t.key, t.dir, t.title, t.stage, t.waiting_on, t.needs_developer, t.hold_merge]), board.inbox, board.hold_all,
-    health.verdict, services.map((s) => [s.name, s.state, s.detail]), actions], drawAttention);
+  part("attn", [tasks.map((t) => [t.key, t.dir, t.title, t.stage, t.waiting_on, t.needs_developer, t.hold_merge, (t.agents || []).map((a) => a.state)]),
+    board.inbox, board.hold_all, health, services.map((s) => [s.name, s.state, s.detail]), board.panel && board.panel.closed, actions], drawAttention);
   const agents = tasks.flatMap((t) => t.agents || []);
   const count = (s) => agents.filter((a) => stateOf(a.state) === s).length;
   $("tasks-sum").textContent = tasks.length ? [plural(tasks.length, "task"), count("running") + " agents running", count("waiting") + " waiting"].join(" · ") : "";
@@ -484,6 +572,7 @@ function render() {
 
 function drawAttention(box) {
   const tasks = board.tasks || [], items = [];
+  const openServices = () => { ui.open.add("services"); shown.more = ""; render(); const f = document.querySelector('[data-fold="services"]'); if (f) { f.scrollIntoView({ block: "start" }); focusKey("fold:services"); } };
   for (const t of tasks.filter((x) => x.needs_developer)) {
     const w = String(t.waiting_on || "").trim();
     const mine = /^(developer|you)\s*:\s*/i.test(w);
@@ -498,41 +587,62 @@ function drawAttention(box) {
     const li = el("li", "attn-item"); add(li, icon("inbox"));
     add(li, el("div", "what", plural(unseen.length, "handoff") + " finished and not yet read"));
     const ul = el("ul");
-    for (const i of unseen) add(ul, el("li", null, base(i.task) + ", from " + i.from + ", " + (ago(i.time) || i.time)));
-    add(li, ul, group("attn:inbox", globalActs(["inbox-seen"]), {}));
+    for (const i of unseen) {
+      const rel = taskKey(i.task), t = taskOf(rel), c = ((board.panel && board.panel.closed) || []).find((x) => x.task === rel);
+      const row = el("li");
+      if (t) { const a = el("a", null, t.key); a.href = "#" + anchor(t.dir); add(row, a, " · " + t.title); }
+      else add(row, c ? (c.key && c.key !== "-" ? c.key : base(rel)) + " · " + c.title + " (closed)" : base(i.task));
+      add(row, ", from " + i.from + ", " + (ago(i.time) || i.time));
+      add(ul, row);
+    }
+    // Only what is listed here is marked: the newest time shown goes with the press.
+    const newest = unseen.reduce((m, i) => (!m || new Date(i.time) > new Date(m) ? i.time : m), "");
+    add(li, ul, group("attn:inbox", globalActs(["inbox-seen"]), { until: newest }, null, false));
     items.push(li);
   }
   if (board.hold_all) {
     const li = el("li", "attn-item"); add(li, icon("lock"));
-    add(li, el("div", "what", "Every merge is on hold"), el("div", "ctx", "Nothing merges anywhere until you lift it."), group("attn:holdall", globalActs(["hold-all-off"]), {}));
+    add(li, el("div", "what", "Every merge is on hold"), el("div", "ctx", "Nothing merges anywhere until you lift it."), group("attn:holdall", globalActs(["hold-all-off"]), {}, null, false));
     items.push(li);
   }
   for (const t of tasks.filter((x) => x.hold_merge)) {
     const li = el("li", "attn-item"); add(li, icon("lock"));
     const a = el("a", null, t.key); a.href = "#" + anchor(t.dir);
     add(li, add(el("div", "what"), "Merges held for ", a), el("div", "ctx", t.title));
-    add(li, group("attn:hold:" + taskKey(t.dir), taskActs(t.dir).filter((x) => x.id === "hold-off"), { task: taskKey(t.dir) }));
+    add(li, group("attn:hold:" + taskKey(t.dir), taskActs(t.dir).filter((x) => x.id === "hold-off"), { task: taskKey(t.dir) }, null, false));
     items.push(li);
   }
-  const v = String((board.health || {}).verdict || "unknown");
-  if (/^unhealthy/.test(v)) {
+  const health = board.health || {};
+  if (/^unhealthy/.test(String(health.verdict || ""))) {
     const li = el("li", "attn-item"); add(li, icon("warn"));
-    add(li, el("div", "what", "The machine is short on room: launch nothing new"), el("div", "ctx", v.replace(/^unhealthy:\s*/, "")));
+    add(li, el("div", "what", "The machine is short on room: launch nothing new"), el("div", "ctx", machineIssues(health).join("; ")));
     items.push(li);
   }
-  for (const s of (board.services || []).filter((x) => x.state === "down")) {
+  for (const s of (board.services || [])) {
+    const trouble = loopTrouble(s);
+    if (s.state !== "down" && !trouble.length) continue;
     const li = el("li", "attn-item"); add(li, icon("warn"));
-    add(li, el("div", "what", s.name + " is down"), el("div", "ctx", (s.detail || []).filter(Boolean)[0] || "Open Everything else, Services, for its controls."));
+    if (s.state === "down") add(li, el("div", "what", s.name + " is down"), el("div", "ctx", humanize((s.detail || []).filter(Boolean)[0] || "No detail from its status.")));
+    else {
+      add(li, el("div", "what", s.name + ": " + (trouble.length === 1 ? humanize(trouble[0]) : plural(trouble.length, "loop") + " stalled or failing")));
+      if (trouble.length > 1) { const ul = el("ul"); for (const l of trouble) add(ul, el("li", null, humanize(l))); add(li, ul); }
+    }
+    const go = el("button", "fold", "Show its controls"); go.type = "button"; go.dataset.fk = "svc-go:" + s.name;
+    go.addEventListener("click", openServices);
+    add(li, add(el("div", "acts"), go));
     items.push(li);
   }
+  // Results of presses made here live in their own slot: the item they came from may be gone after the refresh.
+  const slot = el("div", "attn-res");
+  for (const k of Object.keys(ui.results).filter((x) => x.startsWith("attn:"))) add(slot, result(ui.results[k], k));
   if (!items.length) {
-    const running = (board.tasks || []).flatMap((t) => t.agents || []).filter((a) => stateOf(a.state) === "running").length;
-    const c = el("p", "calm"); add(c, icon("ok"), "Nothing needs you. " + (running ? plural(running, "agent") + " running" : "No agent running") + "; machine " + (v === "healthy" ? "healthy" : v) + ".");
-    add(box, c); return;
+    const running = tasks.flatMap((t) => t.agents || []).filter((a) => stateOf(a.state) === "running").length;
+    const c = el("p", "calm"); add(c, icon("ok"), "Nothing needs you. " + (running ? plural(running, "agent") + " running" : "No agent running") + "; machine " + machineWord(health) + ".");
+    add(box, add(el("div", "calm-wrap"), slot, c)); return;
   }
   const wrap = el("div", "attn");
   add(wrap, add(el("div", "sec-head"), el("h2", null, "Needs you"), el("span", "sum", String(items.length))));
-  add(wrap, add(el("ul", "attn-list"), ...items));
+  add(wrap, slot, add(el("ul", "attn-list"), ...items));
   add(box, wrap);
 }
 
@@ -555,34 +665,43 @@ function drawTask(t) {
   const lh = t.last_handoff || {};
   if (lh.file) add(st, el("span", "empty", "last handoff " + (ago(lh.written) || lh.written)));
   add(card, st);
-  if (t.waiting_on) add(card, add(el("p", "waiting-on"), el("span", null, "Waiting on "), t.waiting_on));
+  if (t.waiting_on) {
+    const w = String(t.waiting_on).trim(), mine = /^(developer|you)\s*:\s*/i.test(w);
+    add(card, add(el("p", "waiting-on"), el("span", null, mine ? "Waiting on you: " : "Waiting on "), mine ? w.replace(/^(developer|you)\s*:\s*/i, "") : w));
+  }
 
   const agents = t.agents || [];
   if (!agents.length) add(card, el("p", "empty", "No agents launched yet."));
   else {
     const counts = {}; for (const a of agents) counts[stateOf(a.state)] = (counts[stateOf(a.state)] || 0) + 1;
-    const cs = el("div", "counts");
-    for (const s of ["running", "waiting", "failed", "done", "stopped", "unknown"]) if (counts[s]) add(cs, add(stateTag(s), " " + counts[s]));
-    add(card, cs);
     const fin = agents.filter((a) => FINISHED.has(stateOf(a.state))).length;
-    const showAll = ui.expanded.has(tk) || fin === agents.length && fin <= 3;
-    add(card, tree(agents, showAll));
-    if (fin && !(fin === agents.length && fin <= 3)) {
-      const done = agents.filter((a) => FINISHED.has(stateOf(a.state)) && stateOf(a.state) !== "unknown").length, unrec = fin - done;
-      const what = [done ? plural(done, "finished agent") : "", unrec ? plural(unrec, "agent") + " with no recorded state" : ""].filter(Boolean).join(" and ");
-      const b = el("button", "fold", (showAll ? "Hide the " : "Show ") + what);
-      b.type = "button"; b.dataset.fk = "exp:" + tk; b.setAttribute("aria-expanded", String(showAll));
-      b.addEventListener("click", () => { if (ui.expanded.has(tk)) ui.expanded.delete(tk); else ui.expanded.add(tk); render(); });
-      add(card, b);
+    const folds = fin && !(fin === agents.length && fin <= 3);
+    const showAll = ui.expanded.has(tk) || !folds;
+    // One line: the states in view, then what is folded with its Show button; never the same count twice.
+    const cs = el("div", "counts");
+    for (const s of ["running", "waiting", "failed", "done", "stopped", "unknown"]) {
+      if (!counts[s] || folds && FINISHED.has(s)) continue;
+      add(cs, s === "unknown" ? add(el("span", "unrec"), plural(counts[s], "agent") + ", state not recorded") : add(stateTag(s), " " + counts[s]));
     }
+    if (folds) {
+      for (const s of ["done", "stopped"]) if (counts[s]) add(cs, add(stateTag(s), " " + counts[s]));
+      if (counts.unknown) add(cs, add(el("span", "unrec"), plural(counts.unknown, "earlier agent") + ", state not recorded"));
+      const b = el("button", "fold", showAll ? "Hide" : "Show");
+      b.type = "button"; b.dataset.fk = "exp:" + tk; b.setAttribute("aria-expanded", String(showAll));
+      b.setAttribute("aria-label", (showAll ? "Hide " : "Show ") + plural(fin, "folded agent"));
+      b.addEventListener("click", () => { if (ui.expanded.has(tk)) ui.expanded.delete(tk); else ui.expanded.add(tk); render(); });
+      add(cs, b);
+    }
+    add(card, cs);
+    add(card, tree(agents, showAll));
   }
-  add(card, group("task:" + tk, taskActs(t.dir), { task: tk }));
 
   const ledger = (board.panel && board.panel.ledgers && board.panel.ledgers[tk]) || [];
+  const acts = taskActs(t.dir);
   const d = el("details", "more-t"); const fk = "task-detail:" + tk;
   if (ui.open.has(fk)) d.open = true;
   d.addEventListener("toggle", () => { if (d.open) ui.open.add(fk); else ui.open.delete(fk); });
-  const s = el("summary", null, "Details and recent ledger"); s.dataset.fk = "fold:" + fk;
+  const s = el("summary", null, acts.length ? "Details, ledger and actions" : "Details and recent ledger"); s.dataset.fk = "fold:" + fk;
   const facts = el("dl", "facts");
   const fact = (k, v) => { if (v) add(facts, el("dt", null, k), el("dd", null, v)); };
   fact("Folder", tk); fact("Complexity", t.complexity !== "unknown" ? t.complexity : "");
@@ -596,6 +715,9 @@ function drawTask(t) {
     for (const l of ledger) add(ul, add(el("li"), el("span", "t", shortTime(l.time)), el("span", "e", l.event), l.text));
     add(d, ul);
   }
+  // A result or an open question keeps the fold open, so it is never hidden behind the summary.
+  const g = group("task:" + tk, acts, { task: tk }, "Actions on this task");
+  if (g) { add(d, g); if (ui.results["task:" + tk] || acts.some((a) => ui.asking === actionKey(a, { task: tk }, "task:" + tk))) d.open = true; }
   add(card, d);
   return card;
 }
@@ -642,14 +764,16 @@ function drawMore(box) {
   if (services.length) {
     const worst = services.find((s) => s.state === "down") || services.find((s) => s.state !== "ok") || services[0];
     const flag = (s) => s.state === "ok" ? "" : ((s.detail || []).find((l) => /stalled|\bdown\b|\berror|\bnot running/i.test(l)) || "");
-    const sum = services.map((s) => s.name + " " + (s.state || "unknown") + (flag(s) ? " (" + flag(s) + ")" : "")).join(" · ");
+    const sum = services.map((s) => s.name + " " + (s.state || "unknown") + (flag(s) ? " (" + humanize(flag(s)) + ")" : "")).join(" · ");
     add(box, fold("services", "Services", sum, worst.state === "ok" ? "" : worst.state === "down" ? "bad" : "warn", (b) => { for (const s of services) add(b, drawService(s)); }));
   }
 
   const v = String(health.verdict || "unknown");
   const readings = (health.readings || []).filter((r) => !/^resource\./.test(r.name));
-  const sumM = (v === "healthy" ? "Healthy" : v) + readings.filter((r) => /_free_/.test(r.name)).map((r) => " · " + nice(r.name).toLowerCase() + " " + r.value + (/_pct$/.test(r.name) ? "%" : /_gb$/.test(r.name) ? " GB" : "")).join("");
-  add(box, fold("machine", "Machine", sumM, /^unhealthy/.test(v) ? "bad" : v === "healthy" ? "" : "warn", (b) => {
+  const free = readings.filter((r) => /_free_/.test(r.name) && r.state !== "unknown").map((r) => " · " + nice(r.name).toLowerCase() + " " + r.value + (/_pct$/.test(r.name) ? "%" : /_gb$/.test(r.name) ? " GB" : "")).join("");
+  const sumM = v === "healthy" ? "Healthy" + free : /^unhealthy/.test(v) ? machineIssues(health).join("; ") : "Not read: no health reading";
+  add(box, fold("machine", "Machine", sumM, /^unhealthy/.test(v) ? "bad" : "", (b) => {
+    if (!readings.length && !resources.length) add(b, el("p", "empty", "No health reading on the board yet: scripts/health.sh did not answer when the board was built."));
     const ms = el("div", "meters");
     for (const r of readings) {
       const unit = /_pct$/.test(r.name) ? "%" : /_gb$/.test(r.name) ? " GB" : "";
@@ -706,7 +830,7 @@ function drawService(s) {
   const box = el("div", "svc");
   add(box, add(el("div", "svc-head"), el("b", null, s.name), el("span", "state-word " + (s.state || "unknown"), s.state || "unknown")));
   const det = (s.detail || []).filter(Boolean);
-  if (det.length) { const ul = el("ul", "lines"); for (const line of det) add(ul, el("li", null, line)); add(box, ul); }
+  if (det.length) { const ul = el("ul", "lines"); for (const line of det) add(ul, el("li", null, humanize(line))); add(box, ul); }
   const list = svcActs(s.name);
   const target = (a) => ({ service: s.name, verb: a.verb });
   // Each verb is its own target, so the groups are split by class: reading verbs, then verbs that change the service.
@@ -714,10 +838,20 @@ function drawService(s) {
     const subset = list.filter((a) => a.class === cls);
     if (!subset.length) continue;
     const gkey = "svc:" + s.name + ":" + cls;
+    const restarts = cls === "confirm" ? subset.filter((a) => /^restart(?:$|[-_.])/.test(a.verb)) : [];
+    const grouped = restarts.length > 2;
     const asking = subset.find((a) => ui.asking === actionKey(a, target(a), gkey));
     const g = el("div"); g.style.display = "flex"; g.style.flexDirection = "column"; g.style.gap = "8px";
     if (asking) add(g, ask(asking, target(asking), gkey));
-    else { const row = el("div", "acts"); add(row, el("span", "lbl", label)); for (const a of subset) add(row, button(a, target(a), gkey)); add(g, row); }
+    else if (grouped && ui.choosing === gkey) add(g, chooser(restarts, target, gkey));
+    else {
+      const row = el("div", "acts"); add(row, el("span", "lbl", label));
+      for (const a of subset) {
+        if (!grouped || !restarts.includes(a)) add(row, button(a, target(a), gkey));
+        else if (a === restarts[0]) add(row, chooseButton(restarts, target, gkey));
+      }
+      add(g, row);
+    }
     if (ui.results[gkey]) add(g, result(ui.results[gkey], gkey));
     add(box, g);
   }
