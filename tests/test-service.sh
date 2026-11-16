@@ -11,6 +11,7 @@ status=cat state.txt
 verb.ping=auto:echo pong
 verb.touch=auto:touch touched.txt
 verb.restart=confirm:touch restarted.txt
+verb.restart.label=auto: touch labelran.txt
 verb.broken=nocolon
 verb.odd=never:echo no
 threads=thr_a, thr_b
@@ -23,10 +24,10 @@ eq "status text" "acme: ok
   queue=0
   age=12s
   panel: http://127.0.0.1:9999/" "$($S status acme)"
-eq "status json" '{"name":"acme","state":"ok","detail":["queue=0","age=12s"],"panel":"http://127.0.0.1:9999/","verbs":[{"verb":"ping","class":"auto"},{"verb":"touch","class":"auto"},{"verb":"restart","class":"confirm"}]}' "$($S status acme --json)"
+eq "status json" '{"name":"acme","state":"ok","detail":["queue=0","age=12s"],"panel":"http://127.0.0.1:9999/","verbs":[{"verb":"ping","class":"auto","label":""},{"verb":"touch","class":"auto","label":""},{"verb":"restart","class":"confirm","label":"auto: touch labelran.txt"}]}' "$($S status acme --json)"
 fails 1 "JSON never carries a command" grep -q "restarted.txt" <<< "$($S status --all --json)"
 printf 'degraded\nloop "x" late\n' > "$SD/state.txt"
-eq "detail is JSON-escaped" '[{"name":"acme","state":"degraded","detail":["loop \"x\" late"],"panel":"http://127.0.0.1:9999/","verbs":[{"verb":"ping","class":"auto"},{"verb":"touch","class":"auto"},{"verb":"restart","class":"confirm"}]}]' "$($S status --all --json)"
+eq "detail is JSON-escaped" '[{"name":"acme","state":"degraded","detail":["loop \"x\" late"],"panel":"http://127.0.0.1:9999/","verbs":[{"verb":"ping","class":"auto","label":""},{"verb":"touch","class":"auto","label":""},{"verb":"restart","class":"confirm","label":"auto: touch labelran.txt"}]}]' "$($S status --all --json)"
 printf 'healthy\n' > "$SD/state.txt"
 eq "a word outside the three reads unknown" "unknown" "$($S status acme --json | sed 's/.*"state":"\([a-z]*\)".*/\1/')"
 printf 'ok\n' > "$SD/state.txt"; echo 'status=cat state.txt; exit 3' > "$SD/fail.conf"
@@ -57,6 +58,8 @@ fails 2 "unknown verb" $S run acme dance
 fails 2 "verb without a class" $S run acme broken
 fails 2 "class outside auto and confirm" $S run acme odd
 fails 2 "stray argument" $S run acme ping --now
+fails 2 "a label line is never a verb" $S run acme restart.label
+fails 1 "and its text never ran" test -f "$SD/labelran.txt"
 echo 'verb.exit=auto:exit 4' >> "$SD/acme.conf"
 fails 4 "run returns the command's exit code" $S run acme exit
 eq "log columns" "ping 0|touch 0|restart refused|restart 0|exit 4" "$(cut -f2,3 "$SD/acme.log" | tr '\t' ' ' | paste -sd'|' -)"
