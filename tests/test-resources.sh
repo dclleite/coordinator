@@ -40,6 +40,20 @@ ok "confirmed stops it" grep -qx 'careful c1: stopped' <<< "$($S/sweep.sh "$D" -
 eq "nothing open" "nothing open" "$($S/sweep.sh "$D")"
 fails 2 "sweep needs a task" $S/sweep.sh "$FIX/nowhere"
 
+# --stoppable: what a confirmed sweep would stop (alive, a stop command, not protected), for every open task or one.
+D3=$($S/task-new.sh personal - stp "Stp"); D4=$($S/task-new.sh personal - stq "Stq")
+printf 's1\ns2\nsp\n' > "$L"
+for r in "thing s1" "thing s-gone" "blind b9" "careful c1"; do $S/resource-add.sh "$D3" $r thr_x >/dev/null; done
+$S/resource-add.sh "$D3" thing sp thr_9 >/dev/null; $S/resource-add.sh "$D4" thing s2 >/dev/null
+printf '#!/bin/sh\ncase "$2" in paths) echo zz;; threads) echo thr_9;; esac\n' > "$FIX/svc-stp"; chmod +x "$FIX/svc-stp"
+eq "stoppable: alive, listable, confirm class included, protected left out" "$(printf '%s\tthing\ts1\n%s\tcareful\tc1' "$D3" "$D3")" \
+  "$(COORD_SERVICE_SH=$FIX/svc-stp $S/sweep.sh --stoppable "$D3")"
+ok "stoppable over every open task" grep -qx "$(printf '%s\tthing\ts2' "$D4")" <<< "$(COORD_SERVICE_SH=$FIX/svc-stp $S/sweep.sh --stoppable)"
+eq "stoppable stopped nothing" "$(printf 's1\ns2\nsp')" "$(cat "$L")"
+eq "and closed no row" 6 "$(awk -F'\t' '$5=="-"' "$D3/resources.tsv" "$D4/resources.tsv" | wc -l | tr -d ' ')"
+fails 2 "stoppable takes a task folder" $S/sweep.sh --stoppable "$FIX/nowhere"
+for d in "$D3" "$D4"; do $S/task-set.sh "$d" status closed >/dev/null; done
+
 # A failing stop is reported and fails the sweep.
 printf 'thing\tcat "$L"\t2\tcat "$L"\tfalse\tauto\n' > "$FIX/.private/config/resources.tsv"
 echo t2 > "$L"; $S/resource-add.sh "$D" thing t2 >/dev/null

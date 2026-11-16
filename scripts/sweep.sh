@@ -4,6 +4,7 @@
 # sweep.sh --readings                 kind, count, limit, state per resource row (health.sh reads this)
 # sweep.sh --run <kind> count|list|limit|class|stop [<id>]
 # sweep.sh --worktrees                worktrees recorded in any task that still exist on disk
+# sweep.sh --stoppable [<task-dir>]   <task-dir> <kind> <id> per open row a confirmed sweep would stop; stops nothing
 set -u
 . "$(dirname "$0")/lib.sh"
 set -a; . "$ROOT/config/health.conf"; set +a
@@ -104,6 +105,28 @@ case "${1:-}" in
     [ -f "$d/resources.tsv" ] && awk -F'\t' '$1=="worktrees" && $5=="-" {print $2}' "$d/resources.tsv"
   done | sort -u | while IFS= read -r wt; do [ -d "$wt" ] && echo "$wt"; done ;;
 
+--stoppable)
+  # One listing per kind that has open rows, whatever the number of tasks; a listing that does not answer offers nothing.
+  if [ -n "${2:-}" ]; then task_dir "$2"; dirs=$2; else dirs=$(open_tasks); fi
+  rows=$(while IFS= read -r d; do
+      [ -n "$d" ] && [ -f "$d/resources.tsv" ] && awk -F'\t' -v d="$d" '$5=="-" && $1!="" {print d "\t" $1 "\t" $2 "\t" $3}' "$d/resources.tsv"
+    done <<< "$dirs")
+  [ -n "$rows" ] || exit 0
+  load_protected
+  while IFS= read -r kind; do
+    line=$(row_of "$kind"); [ -n "$line" ] || continue
+    split_row "$line"; KIND=$kind
+    [ "$F4" != "-" ] && [ "$F5" != "-" ] || continue
+    all=$(run_cmd "$F4") || continue
+    while IFS= read -r r; do
+      split_row "$r"
+      [ "$F2" = "$kind" ] || continue
+      grep -qxF -- "$F3" <<< "$all" || continue
+      is_protected "$F3" "$F4" && continue
+      printf '%s\t%s\t%s\n' "$F1" "$F2" "$F3"
+    done <<< "$rows"
+  done <<< "$(cut -f2 <<< "$rows" | awk '!seen[$0]++')" ;;
+
 --orphans)
   json=0; [ "${2:-}" = --json ] && json=1
   load_protected; first=1; found=0
@@ -136,7 +159,7 @@ case "${1:-}" in
   done <<< "$(table)"
   if [ $json -eq 1 ]; then printf ']\n'; elif [ $found -eq 0 ]; then echo "nothing orphaned"; fi ;;
 
--*|'') die 2 "usage: sweep.sh <task-dir> [--confirmed] | --orphans [--json] | --readings | --run <kind> <action> | --worktrees" ;;
+-*|'') die 2 "usage: sweep.sh <task-dir> [--confirmed] | --orphans [--json] | --readings | --run <kind> <action> | --worktrees | --stoppable [<task-dir>]" ;;
 
 *)
   task_dir "$1"; dir=$1; confirmed=0; [ "${2:-}" = --confirmed ] && confirmed=1
