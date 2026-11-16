@@ -35,8 +35,8 @@ names() {
   done
 }
 
-# A verb.<v>.label=<text> line names a verb for people; it is never a verb itself.
-verbs() { sed -n 's/^verb\.\([^=]*\)=.*/\1/p' "$1" | grep -v '\.label$' | paste -sd, -; }
+# A verb.<v>.label=<text> or verb.<v>.label.<lang>=<text> line names a verb for people; it is never a verb itself.
+verbs() { sed -n 's/^verb\.\([^=]*\)=.*/\1/p' "$1" | grep -v '\.label$' | grep -v '\.label\.[^.]*$' | paste -sd, -; }
 
 # Runs a configured command line in the services folder, with the service's name in the environment.
 # The command is the binding's own text: the binding is private and written by the developer.
@@ -49,7 +49,7 @@ timed() { (cd "$SDIR" && run_limited "$1" env SERVICE_NAME="$2" SERVICE_DIR="$SD
 
 # status_one <name> <json 0|1>: prints the service's state; the command's output is never written to disk.
 status_one() {
-  local f cmd out rc state detail="" panel line label first=1 n=0
+  local f cmd out rc state detail="" panel line label first=1 n=0 v l lfirst
   f=$(conf_of "$1") || exit 2
   panel=$(conf_get "$f" panel) || panel=""
   if cmd=$(conf_get "$f" status) && [ -n "$cmd" ]; then
@@ -73,12 +73,20 @@ status_one() {
     first=1
     # Only verbs `run` would accept, and never their commands: a panel turns these into buttons.
     while IFS= read -r line; do
-      case $line in verb.*.label=*) continue;; verb.*=auto:?*|verb.*=confirm:?*) ;; *) continue;; esac
-      line=${line#verb.}
-      label=$(conf_get "$f" "verb.${line%%=*}.label") || label=""
+      case $line in verb.*.label=*|verb.*.label.*=*) continue;; verb.*=auto:?*|verb.*=confirm:?*) ;; *) continue;; esac
+      line=${line#verb.}; v=${line%%=*}
+      label=$(conf_get "$f" "verb.$v.label") || label=""
       [ "$first" = 1 ] || printf ','; first=0
-      printf '{"verb":%s,"class":%s,"label":%s}' "$(json_str "${line%%=*}")" \
+      printf '{"verb":%s,"class":%s,"label":%s,"labels":{' "$(json_str "$v")" \
         "$(json_str "$(printf '%s' "${line#*=}" | cut -d: -f1)")" "$(json_str "$label")"
+      # One label per language, the first line of each winning, as conf_get reads them.
+      lfirst=1
+      while IFS= read -r l; do
+        [ -n "$l" ] || continue
+        [ "$lfirst" = 1 ] || printf ','; lfirst=0
+        printf '%s:%s' "$(json_str "${l%%=*}")" "$(json_str "$(conf_get "$f" "verb.$v.label.${l%%=*}")")"
+      done <<< "$(sed -n "s/^verb\.$(printf '%s' "$v" | sed 's/[.]/\\./g')\.label\.\([A-Za-z0-9-]*\)=.*/\1/p" "$f" | awk '!seen[$0]++')"
+      printf '}}'
     done < "$f"
     printf ']}'
   else
@@ -115,7 +123,7 @@ log_run() { printf '%s\t%s\t%s\n' "$(now)" "$2" "$3" >> "$SDIR/$1.log"; }
 cmd_run() {
   local name=${1:-} verb=${2:-} confirmed=0 f spec class cmd rc
   [ -n "$name" ] && [ -n "$verb" ] || usage
-  case $verb in *.label) die 2 "service $name has no verb $verb";; esac
+  case $verb in *.label|*.label.*) die 2 "service $name has no verb $verb";; esac
   case ${3:-} in '') ;; --confirmed) confirmed=1;; *) usage;; esac
   [ $# -le 3 ] || usage
   f=$(conf_of "$name") || exit 2

@@ -18,6 +18,8 @@ while True:
     except OSError: pass
     finally: s.close()')
 setconf PANEL_PORT_FROM "$port"; setconf PANEL_REFRESH_SEC 1; setconf PANEL_IDLE_MIN 5
+# The first pass reads the page by its English words, whatever the browser's languages; the second reads it in pt-BR.
+mkdir -p "$COORD_DATA/config"; echo PANEL_LANG=en > "$COORD_DATA/config/panel.conf"
 
 A=$($S/task-new.sh company ACME-1 alpha "Alpha task")
 $S/task-set.sh "$A" needs_developer yes; $S/task-set.sh "$A" waiting_on "developer: pick a fix"
@@ -34,6 +36,7 @@ verb.restart=confirm:echo restarted
 verb.restart-a=confirm:echo restarted a
 verb.restart-b=confirm:echo restarted b
 verb.restart-a.label=Restart part A
+verb.restart-a.label.pt-BR=Reiniciar a parte A
 CONF
 
 browser_name=""
@@ -162,3 +165,89 @@ eq "a result stays until dismissed" true "$(v dismissed)"
 eq "stopped: the live toggle and the content take no input" "true true" "$(v liveDisabled) $(v mainInert)"
 eq "each press ran once" "1 1" "$(n $'\tinbox-seen\t' "$log") $(n $'\thold-off\t' "$log")"
 ok "the stop ended the server" sh -c "i=0; while kill -0 $pid 2>/dev/null && [ \$i -lt 50 ]; do sleep 0.1; i=\$((i+1)); done; ! kill -0 $pid 2>/dev/null"
+
+# The Portuguese pass: the same fixture read in pt-BR, with a hold and a handoff to read again.
+echo PANEL_LANG=pt-BR > "$COORD_DATA/config/panel.conf"
+$S/hold.sh on "$A" >/dev/null
+printf 'Third handoff.\n' | $S/handoff-write.sh "$A" worker coordinator >/dev/null
+url=$($S/panel.sh start) || { echo "FAIL: the panel did not start in pt-BR"; exit 1; }
+pid=$(cat "$P/pid")
+# Every English text the Portuguese table says differently, cut at its first placeholder: none may show.
+python3 -c 'import json,re,sys
+en, pt = (json.load(open(sys.argv[1] + "/" + n + ".json")) for n in ("en", "pt-BR"))
+cut = lambda s: re.split(r"\{[a-z]+\}", s)[0].strip(" :,(")
+print(json.dumps({"keys": sorted(en), "en": sorted({cut(v) for k, v in en.items() if v != pt[k] and len(cut(v)) >= 6})}))' \
+  "$ROOT/panel/locales" > "$W/words.json"
+{ sed "s|__URL__|$url|" <<'JS'
+const page = await browser.getPage("panel-check");
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.goto("__URL__");
+await page.waitForSelector("#tasks article", { timeout: 20000 });
+const r = {};
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const text = (sel) => page.evaluate((s) => { const e = document.querySelector(s); return e ? e.textContent.trim() : ""; }, sel);
+let failed = "";
+async function step(name, fn) { if (failed) return; try { await fn(); } catch (e) { failed = name + ": " + String(e && e.message || e).split("\n")[0]; } }
+await step("headings and words", async () => {
+  r.lang = await page.evaluate(() => document.documentElement.lang);
+  r.title = await page.evaluate(() => document.title);
+  r.headings = await page.evaluate(() => [...document.querySelectorAll("h2")].map((e) => e.textContent.trim()).join("|"));
+  r.state = await text("#tasks .ag-row .st");
+  r.holdButton = await text('button[data-fk^="attn:hold:"]');
+  r.loop = await page.evaluate(() => [...document.querySelectorAll("#attn .attn-item .what")].map((e) => e.textContent).find((x) => /^toy:/.test(x)) || "");
+});
+await step("a question", async () => {
+  await page.click('[data-fk="fold:services"]', { timeout: 10000 });
+  await page.click('[data-fk="choose:svc:toy:confirm"]', { timeout: 10000 });
+  await page.click('[data-fk="opt:svc:toy:confirm|service-verb||toy|restart-a"]', { timeout: 10000 });
+  r.question = await text('[data-fk^="ask:"] .q');
+  r.yes = await text('[data-fk^="go:"]');
+  await page.keyboard.press("Escape");
+});
+await step("an action and its result", async () => {
+  r.pingButton = await text('[data-fk="svc:toy:auto|service-verb||toy|ping"]');
+  await page.click('[data-fk="svc:toy:auto|service-verb||toy|ping"]', { timeout: 10000 });
+  await page.waitForSelector('[data-fk="dismiss:svc:toy:auto"]', { timeout: 15000 });
+  r.resultWord = await text('[data-fk="res:svc:toy:auto"] .res-head .st');
+  r.resultOutput = await text('[data-fk="res:svc:toy:auto"] pre');
+  r.dismiss = await text('[data-fk="dismiss:svc:toy:auto"]');
+});
+await step("no key and no English", async () => {
+  await page.evaluate(() => { for (const d of document.querySelectorAll("details")) d.open = true; });
+  await sleep(300);
+  const words = __WORDS__;
+  r.leftovers = await page.evaluate((w) => {
+    const seen = [];
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const texts = [];
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) if (!n.parentElement.closest("script, pre, code")) texts.push(n.textContent);
+    for (const e of document.querySelectorAll("[title], [aria-label]")) texts.push(e.getAttribute("title") || "", e.getAttribute("aria-label") || "");
+    texts.push(document.title);
+    for (const tx of texts) {
+      const s = tx.trim();
+      if (w.keys.includes(s)) seen.push("key " + s);
+      for (const e of w.en) if (s.includes(e)) seen.push("English " + e);
+    }
+    return [...new Set(seen)].join("; ");
+  }, words);
+});
+r.failedAt = failed;
+console.log("RESULTS " + JSON.stringify(r));
+JS
+} | python3 -c 'import sys; print(sys.stdin.read().replace("__WORDS__", open(sys.argv[1]).read().strip()))' "$W/words.json" > "$W/drive-pt.js"
+
+out=$(browse < "$W/drive-pt.js" 2>&1); rc=$?
+json=$(printf '%s\n' "$out" | sed -n 's/^RESULTS //p' | tail -1)
+if [ -z "$json" ]; then echo "FAIL: the Portuguese browser script did not finish (exit $rc)"; printf '%s\n' "$out" | tail -20; exit 1; fi
+eq "pt-BR: every step of the page ran" "" "$(v failedAt)"
+eq "pt-BR: the page says its language" "pt-BR Painel do coordinator" "$(v lang) $(v title)"
+eq "pt-BR: the main headings" "Precisa de você|Tarefas abertas|Todo o resto" "$(v headings)"
+eq "pt-BR: a state word" "rodando" "$(v state)"
+eq "pt-BR: a button says what will happen" "Liberar os merges desta tarefa…pergunta antes" "$(v holdButton)"
+eq "pt-BR: durations follow the language, the service's words stay" "toy: loop: last tick há 11 h, esperado a cada 30 min: stalled" "$(v loop)"
+eq "pt-BR: the question names the action by the binding's Portuguese label and the target" "Reiniciar a parte A (toy)?" "$(v question)"
+eq "pt-BR: the answer button" "Sim, reiniciar a parte A" "$(v yes)"
+eq "pt-BR: an action with no Portuguese label of its own" "Rodar ping" "$(v pingButton)"
+eq "pt-BR: its result" "Concluído|pong|Fechar" "$(v resultWord)|$(v resultOutput)|$(v dismiss)"
+eq "pt-BR: no key name and no English where a translation exists" "" "$(v leftovers)"
+$S/panel.sh stop >/dev/null

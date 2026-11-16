@@ -30,7 +30,10 @@ WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 # The only shape {until} takes: a time as the inbox writes it.
 TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$")
 VERB_LINE = re.compile(r"^verb\.([A-Za-z0-9._-]+)=(auto|confirm):")
-LABEL_LINE = re.compile(r"^verb\.([A-Za-z0-9._-]+)\.label=(.+)$")
+# verb.<v>.label=<text>, or verb.<v>.label.<lang>=<text> for one language; a label line is never a verb.
+LABEL_LINE = re.compile(r"^verb\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*?)\.label(?:\.([A-Za-z0-9-]+))?=(.+)$")
+LANG_NAME = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
+FALLBACK_LANG = "en"
 # Which buttons apply depends on the hold state; ids absent here always apply.
 APPLIES = {
     "hold-on": lambda t, g: t.get("hold_merge") != "yes",
@@ -70,6 +73,8 @@ class Panel:
         self.scripts = a.scripts
         self.page_path = a.page
         self.actions_path = a.actions
+        self.locales = a.locales
+        self.lang = a.lang
         self.idle = float(a.idle_min) * 60
         self.refresh = int(a.refresh_sec)
         with open(a.token_file, encoding="ascii") as f:
@@ -123,15 +128,15 @@ class Panel:
         for n in names:
             if not n.endswith(".conf") or not WORD.match(n[:-5]):
                 continue
-            verbs, labels, panel = {}, {}, ""
+            verbs, labels, panel = {}, {}, ""   # labels: verb -> {lang or "": text}
             try:
                 with open(os.path.join(sd, n), encoding="utf-8", errors="replace") as f:
                     for line in f.read().splitlines():
                         line = line.rstrip("\r")
                         lab, m = LABEL_LINE.match(line), VERB_LINE.match(line)
                         if lab:
-                            labels.setdefault(lab.group(1), lab.group(2).strip())
-                        elif m and not m.group(1).endswith(".label") and m.group(1) not in verbs:
+                            labels.setdefault(lab.group(1), {}).setdefault(lab.group(2) or "", lab.group(3).strip())
+                        elif m and not re.search(r"\.label(\.[^.]*)?$", m.group(1)) and m.group(1) not in verbs:
                             verbs[m.group(1)] = m.group(2)
                         elif line.startswith("panel=") and not panel:
                             panel = line[6:]
@@ -189,8 +194,11 @@ class Panel:
                         if cls != "never":
                             b = self.button(a, cls, {"{service}": name, "{verb}": verb})
                             b["verb"] = verb
-                            if s["labels"].get(verb):
-                                b["label"] = s["labels"][verb]
+                            # The page picks its language's label, then the binding's own, then the table's.
+                            own = s["labels"].get(verb, {})
+                            b["verb_labels"] = own
+                            if own.get(""):
+                                b["label"] = own[""]
                             per_svc[name].append(b)
         for k, (d, fm) in tasks.items():
             out["tasks"].append({"task": k, "dir": d, "actions": per_task[k]})
@@ -288,7 +296,7 @@ class Panel:
         key = (a["id"], target)
         with self.run_lock:
             if key in self.running:
-                return 409, {"error": "already running", "_class": cls, "_target": target}, False
+                return 409, {"error": "already running", "code": "already-running", "_class": cls, "_target": target}, False
             self.running.add(key)
         try:
             if a["argv"][0] == "panel.sh":
@@ -302,19 +310,19 @@ class Panel:
         """(status, answer) when the press is refused; otherwise (action, class, argv, target, task dir)."""
         for k in ("id", "task", "service", "verb", "until"):
             if not isinstance(req.get(k, ""), str):
-                return 400, {"error": "%s must be a string" % k}
+                return 400, {"error": "%s must be a string" % k, "code": "not-string"}
         if not isinstance(req.get("confirmed", False), bool):
-            return 400, {"error": "confirmed must be true or false"}
+            return 400, {"error": "confirmed must be true or false", "code": "bad-confirmed"}
         aid = req.get("id", "")
         a = next((x for x in self.actions() if x["id"] == aid), None)
         if a is None:
-            return 404, {"error": "no such action"}
+            return 404, {"error": "no such action", "code": "no-action"}
         cls, subst, target, task_dir = a["class"], {}, "", None
         if a["scope"] == "task":
             tasks = self.open_tasks()
             key = req.get("task", "")
             if key not in tasks:
-                return 404, {"error": "not an open task folder"}
+                return 404, {"error": "not an open task folder", "code": "no-task"}
             task_dir = tasks[key][0]
             subst["{task_dir}"] = task_dir
             target = key
@@ -322,30 +330,30 @@ class Panel:
             name, verb = req.get("service", ""), req.get("verb", "")
             svcs = self.services()
             if name not in svcs:
-                return 404, {"error": "no such service"}
+                return 404, {"error": "no such service", "code": "no-service"}
             if verb not in svcs[name]["verbs"]:
-                return 404, {"error": "the service binding lists no such verb"}
+                return 404, {"error": "the service binding lists no such verb", "code": "no-verb"}
             cls = max(cls, svcs[name]["verbs"][verb], key=CLASS_RANK.get)
             subst["{service}"], subst["{verb}"] = name, verb
             target = name + " " + verb
         if "{until}" in a["argv"]:
             if not TIMESTAMP.match(req.get("until", "")):
-                return 400, {"error": "until must be a time such as 2026-01-31T09:00:00+00:00", "_class": cls}
+                return 400, {"error": "until must be a time such as 2026-01-31T09:00:00+00:00", "code": "bad-until", "_class": cls}
             subst["{until}"] = req["until"]
         if cls == "never":
-            return 404, {"error": "no such action"}
+            return 404, {"error": "no such action", "code": "no-action"}
         if cls == "confirm" and req.get("confirmed") is not True:
-            return 428, {"error": "needs confirmation", "confirm": True, "_class": cls, "_target": target}
+            return 428, {"error": "needs confirmation", "code": "needs-confirmation", "confirm": True, "_class": cls, "_target": target}
         argv = [subst.get(w, w) for w in a["argv"]]
         argv[0] = os.path.join(self.scripts, argv[0])
         if a["scope"] == "service" and cls == "confirm":
             argv.append("--confirmed")
         if not os.access(argv[0], os.X_OK):
-            return 404, {"error": "the action's script is missing", "_class": cls, "_target": target}
+            return 404, {"error": "the action's script is missing", "code": "script-missing", "_class": cls, "_target": target}
         return a, cls, argv, target, task_dir
 
     def execute(self, a, cls, argv, target, task_dir):
-        aid = a["id"]
+        aid, extra = a["id"], {}
         try:
             p = subprocess.run(argv, cwd=self.scripts, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, timeout=ACTION_TIMEOUT)
@@ -353,7 +361,7 @@ class Panel:
         except subprocess.TimeoutExpired as e:
             code, out = 124, (e.output or b"") + b"\n(timed out)"
         except OSError:
-            code, out = 127, b"could not start the action"
+            code, out, extra = 127, b"could not start the action", {"code": "start-failed"}
         self.log(cls, aid, target, code)
         if task_dir:
             subprocess.run([os.path.join(self.scripts, "ledger.sh"), task_dir, "panel",
@@ -363,7 +371,7 @@ class Panel:
         text = out.decode("utf-8", "replace")
         if len(text) > OUTPUT_MAX:
             text = text[:OUTPUT_MAX] + "\n(cut)"
-        return 200, {"exit": code, "output": text}
+        return 200, dict({"exit": code, "output": text}, **extra)
 
     def stop_later(self, a, cls, argv, target):
         # panel.sh stop ends this process, so it runs detached after the answer has gone out.
@@ -373,7 +381,60 @@ class Panel:
                              stderr=subprocess.DEVNULL, start_new_session=True)
         self.log(cls, a["id"], target, 0)
         threading.Thread(target=later, daemon=True).start()
-        return 200, {"exit": 0, "output": "the panel is stopping"}
+        return 200, {"exit": 0, "output": "the panel is stopping", "code": "stopping"}
+
+
+def load_tables(folder):
+    """Language name -> {key: text} for every panel/locales/<lang>.json; an empty text counts as missing."""
+    out = {}
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return out
+    for n in names:
+        if not n.endswith(".json") or not LANG_NAME.match(n[:-5]):
+            continue
+        try:
+            with open(os.path.join(folder, n), encoding="utf-8") as f:
+                t = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(t, dict):
+            out[n[:-5]] = {k: v for k, v in t.items() if isinstance(k, str) and isinstance(v, str) and v.strip()}
+    return out
+
+
+def accepted(header):
+    """The language tags of an Accept-Language header, most wanted first; q=0 and * are left out."""
+    tags = []
+    for i, part in enumerate((header or "").split(",")):
+        tag, _, params = part.strip().partition(";")
+        q = 1.0
+        m = re.search(r"q\s*=\s*([0-9.]+)", params)
+        if m:
+            try:
+                q = float(m.group(1))
+            except ValueError:
+                q = 0.0
+        tag = tag.strip()
+        if tag and tag != "*" and q > 0 and LANG_NAME.match(tag):
+            tags.append((-q, i, tag))
+    return [t for _, _, t in sorted(tags)]
+
+
+def choose_lang(setting, header, names):
+    """auto: the first browser language a table exists for, its base language matching too; else English."""
+    if setting != "auto":
+        return setting if setting in names else FALLBACK_LANG
+    lower = {n.lower(): n for n in names}
+    for tag in accepted(header):
+        if tag.lower() in lower:
+            return lower[tag.lower()]
+        b = tag.split("-")[0].lower()
+        same = sorted(n for n in names if n.split("-")[0].lower() == b)
+        if same:
+            return lower.get(b, same[0])
+    return FALLBACK_LANG
 
 
 def make_handler(panel):
@@ -402,27 +463,28 @@ def make_handler(panel):
             if self.command != "HEAD":
                 self.wfile.write(body)
 
-        def refuse(self, code, why):
-            self.send(code, {"error": why})
+        def refuse(self, code, why, ecode):
+            # The page shows its own words for a code it knows, else this English text.
+            self.send(code, {"error": why, "code": ecode})
 
         def guard(self, api):
             """Returns True when the request may go on; otherwise it has been answered."""
             host = self.headers.get("Host", "")
             own = ("127.0.0.1:%d" % panel.port, "localhost:%d" % panel.port)
             if host not in own:
-                self.refuse(403, "wrong Host")
+                self.refuse(403, "wrong Host", "wrong-host")
                 return False
             origin = self.headers.get("Origin")
             if origin is not None and origin != "http://" + host:
-                self.refuse(403, "request from another site")
+                self.refuse(403, "request from another site", "cross-site")
                 return False
             site = self.headers.get("Sec-Fetch-Site")
             if site is not None and site not in ("same-origin", "none"):
-                self.refuse(403, "request from another site; open the panel address directly")
+                self.refuse(403, "request from another site; open the panel address directly", "cross-site-open")
                 return False
             if api and not hmac.compare_digest(self.headers.get("X-Panel-Token", "").encode("utf-8"),
                                                panel.token.encode("utf-8")):
-                self.refuse(403, "missing or wrong token")
+                self.refuse(403, "missing or wrong token", "bad-token")
                 return False
             if not api and not hmac.compare_digest(self.key().encode("utf-8"), panel.token.encode("utf-8")):
                 self.send(403, "This panel opens only from its full address, which carries a key.\n"
@@ -446,45 +508,45 @@ def make_handler(panel):
                 live = parse_qs(u.query).get("live", ["0"])[0] == "1"
                 body = panel.board(live)
                 if body is None:
-                    self.refuse(503, "no board.json yet")
+                    self.refuse(503, "no board.json yet", "no-board")
                 else:
                     self.send(200, body)
             elif u.path == "/api/actions":
                 self.send(200, panel.list_actions())
             else:
-                self.refuse(404, "not found")
+                self.refuse(404, "not found", "not-found")
 
         def do_POST(self):
             u = urlsplit(self.path)
             if not self.guard(True):
                 return
             if u.path != "/api/run":
-                self.refuse(404, "not found")
+                self.refuse(404, "not found", "not-found")
                 return
             ctype = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
             if ctype != "application/json":
-                self.refuse(415, "the body must be application/json")
+                self.refuse(415, "the body must be application/json", "not-json-type")
                 return
             try:
                 n = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 n = -1
             if n < 0 or n > BODY_MAX:
-                self.refuse(413, "body too large")
+                self.refuse(413, "body too large", "too-large")
                 return
             try:
                 req = json.loads(self.rfile.read(n).decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
-                self.refuse(400, "the body is not JSON")
+                self.refuse(400, "the body is not JSON", "not-json")
                 return
             if not isinstance(req, dict):
-                self.refuse(400, "the body must be a JSON object")
+                self.refuse(400, "the body must be a JSON object", "not-object")
                 return
             code, answer = panel.run(req)
             self.send(code, answer)
 
         def refuse_method(self):
-            self.send(405, {"error": "method not allowed"}, extra={"Allow": "GET, POST"})
+            self.send(405, {"error": "method not allowed", "code": "method"}, extra={"Allow": "GET, POST"})
 
         do_OPTIONS = do_PUT = do_DELETE = do_PATCH = do_HEAD = refuse_method
 
@@ -493,7 +555,7 @@ def make_handler(panel):
                 with open(panel.page_path, encoding="utf-8") as f:
                     html = f.read()
             except OSError:
-                self.refuse(500, "the page is missing")
+                self.refuse(500, "the page is missing", "page-missing")
                 return
             nonce = secrets.token_urlsafe(16)
             frames = " ".join(sorted({s["panel"] for s in panel.services().values()
@@ -501,9 +563,17 @@ def make_handler(panel):
             csp = ("default-src 'none'; script-src 'nonce-%s'; style-src 'unsafe-inline'; connect-src 'self'; "
                    "img-src 'self' data:; frame-src %s; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
                    % (nonce, frames or "'none'"))
+            tables = load_tables(panel.locales)
+            lang = choose_lang(panel.lang, self.headers.get("Accept-Language", ""), tables)
+            strings = dict(tables.get(FALLBACK_LANG, {}))
+            strings.update(tables.get(lang, {}))
+            # Read by the page as JSON text, never run: <, > and & are escaped so no text can close the block.
+            data = (json.dumps({"lang": lang, "strings": strings}, ensure_ascii=False, sort_keys=True)
+                    .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
             html = (html.replace("__PANEL_TOKEN__", panel.token).replace("__PANEL_NONCE__", nonce)
                     .replace("__PANEL_REFRESH__", str(panel.refresh))
-                    .replace("__PANEL_IDLE__", "%g" % (panel.idle / 60)))
+                    .replace("__PANEL_IDLE__", "%g" % (panel.idle / 60))
+                    .replace("__PANEL_LANG__", lang).replace("__PANEL_LOCALE__", data))
             self.send(200, html, "text/html; charset=utf-8", {"Content-Security-Policy": csp})
 
     return Handler
@@ -567,9 +637,14 @@ def write_atomic(path, text):
 
 def main():
     p = argparse.ArgumentParser()
-    for k in ("data", "scripts", "page", "actions", "token-file", "port-from", "idle-min", "refresh-sec"):
+    for k in ("data", "scripts", "page", "actions", "locales", "lang", "token-file", "port-from", "idle-min", "refresh-sec"):
         p.add_argument("--" + k, required=True)
     a = p.parse_args()
+    names = sorted(load_tables(a.locales))
+    if FALLBACK_LANG not in names or (a.lang != "auto" and a.lang not in names):
+        print("PANEL_LANG=%s has no table; use auto or one of: %s (%s/<lang>.json)"
+              % (a.lang, ", ".join(names) or "none", a.locales), file=sys.stderr)
+        return 2
     os.umask(0o077)
     try:
         os.setsid()

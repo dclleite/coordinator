@@ -8,11 +8,20 @@ usage() { die 2 "usage: panel.sh start | stop | status | url | reap [--dry-run]"
 [ $# -eq 1 ] || { [ $# -eq 2 ] && [ "$1" = reap ] && [ "$2" = --dry-run ]; } || usage
 P=$DATA/panel
 CONF=$ROOT/config/panel.conf
+# A person's own choices live in the private file, read after the tracked one: its value wins key by key.
+MYCONF=$DATA/config/panel.conf
+LOCALES=$SCRIPTS/../panel/locales
 
 conf() { # <key> <default>
   local v
-  v=$(sed -n "s/^$1=\([0-9][0-9.]*\)[[:space:]]*\$/\1/p" "$CONF" 2>/dev/null | tail -1)
+  v=$(cat "$CONF" "$MYCONF" 2>/dev/null | sed -n "s/^$1=\([0-9][0-9.]*\)[[:space:]]*\$/\1/p" | tail -1)
   printf '%s\n' "${v:-$2}"
+}
+# lang_conf: PANEL_LANG, auto or a language with a table in panel/locales.
+lang_conf() {
+  local v
+  v=$(cat "$CONF" "$MYCONF" 2>/dev/null | sed -n 's/^PANEL_LANG=//p' | tail -1 | sed 's/[[:space:]]*$//')
+  printf '%s\n' "${v:-auto}"
 }
 
 # alive: true when the pid file names a running panel server (a reused pid is not one).
@@ -69,12 +78,17 @@ start)
   case "$from$refresh" in *[!0-9]*) die 2 "config/panel.conf: PANEL_PORT_FROM and PANEL_REFRESH_SEC must be whole numbers" ;; esac
   case "$idle" in *.*.*|.*|*.) die 2 "config/panel.conf: PANEL_IDLE_MIN must be a number" ;; esac
   [ "$from" -ge 1024 ] && [ "$from" -le 65000 ] || die 2 "config/panel.conf: PANEL_PORT_FROM must be between 1024 and 65000"
+  lang=$(lang_conf)
+  if [ "$lang" != auto ] && { case "$lang" in *[!A-Za-z0-9-]*|'') true ;; *) false ;; esac || [ ! -f "$LOCALES/$lang.json" ]; }; then
+    have=$(cd "$LOCALES" 2>/dev/null && ls *.json 2>/dev/null | sed 's/\.json$//' | paste -sd, - | sed 's/,/, /g')
+    die 2 "PANEL_LANG=$lang has no table; use auto or one of: ${have:-none} (panel/locales/<lang>.json)"
+  fi
   lock; chmod 700 "$P"
   if alive; then url; exit 0; fi
   stop >/dev/null
   (umask 077; python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > "$P/token") || die 1 "cannot write the token"
   COORD_DATA=$DATA nohup python3 "$SCRIPTS/panel-server.py" --data "$DATA" --scripts "$SCRIPTS" \
-    --page "$SCRIPTS/../panel/index.html" --actions "$ROOT/config/panel-actions.tsv" --token-file "$P/token" \
+    --page "$SCRIPTS/../panel/index.html" --actions "$ROOT/config/panel-actions.tsv" --locales "$LOCALES" --lang "$lang" --token-file "$P/token" \
     --port-from "$from" --idle-min "$idle" --refresh-sec "$refresh" </dev/null >/dev/null 2>&1 &
   i=0; while [ $i -lt 300 ]; do
     [ -s "$P/port" ] && alive && { url; exit 0; }

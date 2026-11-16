@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="__PANEL_LANG__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,7 +7,7 @@
 <meta name="panel-refresh" content="__PANEL_REFRESH__">
 <meta name="panel-idle" content="__PANEL_IDLE__">
 <link rel="icon" href="data:,">
-<title>Coordinator panel</title>
+<title data-i18n="page.title"></title>
 <style>
 /* One column, read top to bottom: what needs you, then each open task's tree, then everything else folded. */
 :root {
@@ -231,27 +231,30 @@ code, .cmd { font-family: var(--mono); font-size: 0.92em; background: var(--sunk
 </head>
 <body>
 <header class="bar"><div class="wrap">
-  <span class="brand">Coordinator</span>
-  <span id="fresh" class="fresh busy" role="status"><span class="dot" aria-hidden="true"></span><span id="fresh-t">Reading the board</span></span>
+  <span class="brand" data-i18n="bar.brand"></span>
+  <span id="fresh" class="fresh busy" role="status"><span class="dot" aria-hidden="true"></span><span id="fresh-t" data-i18n="bar.reading"></span></span>
   <span class="grow"></span>
-  <label class="toggle" title="Ask the agent runtime for each running agent's own state; slower"><input type="checkbox" id="live"> Live state from the runtime</label>
+  <label class="toggle" data-i18n-title="bar.live.tip"><input type="checkbox" id="live"> <span data-i18n="bar.live"></span></label>
 </div></header>
 <div class="wrap"><div id="gone" class="gone" role="alert" hidden></div></div>
 <main id="main" class="wrap" aria-busy="true">
-  <section id="attn" aria-label="Needs you"><div class="loading">Reading the board…</div></section>
+  <section id="attn" data-i18n-aria="sec.needs"><div class="loading" data-i18n="loading"></div></section>
   <section aria-labelledby="tasks-h">
-    <div class="sec-head"><h2 id="tasks-h">Open tasks</h2><span id="tasks-sum" class="sum"></span></div>
+    <div class="sec-head"><h2 id="tasks-h" data-i18n="sec.tasks"></h2><span id="tasks-sum" class="sum"></span></div>
     <div id="tasks" class="tasks"></div>
   </section>
   <section aria-labelledby="more-h">
-    <div class="sec-head"><h2 id="more-h">Everything else</h2></div>
+    <div class="sec-head"><h2 id="more-h" data-i18n="sec.more"></h2></div>
     <div id="more" class="more"></div>
   </section>
 </main>
 <div id="announce" class="sr" aria-live="polite"></div>
+<script type="application/json" id="panel-locale">__PANEL_LOCALE__</script>
 <script nonce="__PANEL_NONCE__">
 "use strict";
-// Everything from the API goes in through textContent; nothing is ever parsed as markup.
+// Everything from the API and from the locale table goes in through textContent; nothing is ever parsed as markup.
+// Every word the page writes comes from the table through t, tn or tnodes; tests/test-panel.sh fails on an English literal here.
+const $ = (id) => document.getElementById(id);
 const TOKEN = document.querySelector('meta[name="panel-token"]').content;
 // The key opened the page once; it leaves the address bar, the history and any bookmark.
 history.replaceState(null, "", location.pathname);
@@ -260,14 +263,47 @@ const IDLE = document.querySelector('meta[name="panel-idle"]').content;
 const STAGES = ["intake", "align", "build", "review", "demo", "developer-review", "ship", "watch", "cleanup", "done"];
 // Folded behind a count: finished agents, and old rows that never recorded a state.
 const FINISHED = new Set(["done", "stopped", "unknown"]);
-const $ = (id) => document.getElementById(id);
+
+/* ---------- words ---------- */
+// The server sends the active table with every English key it lacks already filled in.
+let LOC = {};
+try { LOC = JSON.parse($("panel-locale").textContent); } catch (e) { LOC = {}; }
+const LANG = LOC.lang || "en", STR = LOC.strings || {};
+const PLURAL = new Intl.PluralRules(LANG), NUM = new Intl.NumberFormat(LANG, { maximumFractionDigits: 1 });
+function num(n) { const x = Number(n); return String(n).trim() !== "" && isFinite(x) ? NUM.format(x) : String(n); }
+function has(key) { return typeof STR[key] === "string"; }
+function fill(s, vars) { return s.replace(/\{([a-z]+)\}/g, (m, k) => (vars && k in vars ? String(vars[k]) : m)); }
+function t(key, vars) { return fill(has(key) ? STR[key] : key, vars); }
+// Plurals: <key>.zero for exactly 0 when the table has it, else <key>.<category> by the language's rules, then <key>.other.
+function tn(key, n, vars) { const k = key + "." + (n === 0 && has(key + ".zero") ? "zero" : PLURAL.select(n)); return t(has(k) ? k : key + ".other", Object.assign({ n: num(n) }, vars)); }
+// A text with an element in it: {name} placeholders whose value is a node are put in as that node.
+function tnodes(key, vars, wrap) {
+  return t(key).split(/(\{[a-z]+\})/).filter(Boolean).map((p) => {
+    const k = /^\{([a-z]+)\}$/.exec(p), v = k && vars ? vars[k[1]] : undefined;
+    if (v instanceof Node) return v;
+    const s = v !== undefined ? String(v) : p;
+    return wrap && !k ? el("span", null, s) : s;
+  });
+}
+function stateWord(s) { return t("state." + s); }
+function stageWord(s) { return s && STAGES.includes(s) ? t("stage." + s) : (s || t("stage.unknown")); }
+function svcWord(s) { return ["ok", "degraded", "down"].includes(s) ? t("svcstate." + s) : t("svcstate.unknown"); }
+function actionLabel(a) {
+  // A binding's label in this language, then its own, then the table's words for the action, then the server's.
+  if (a.verb !== undefined) { const v = a.verb_labels || {}; if (v[LANG]) return v[LANG]; if (v[""]) return v[""]; }
+  const k = "action." + a.id + ".label";
+  return has(k) ? t(k, { verb: a.verb || "" }) : a.label;
+}
+function serverText(j) { return j && j.code && has("server." + j.code) ? t("server." + j.code) : (j && j.error) || ""; }
+document.documentElement.lang = LANG;
+for (const e of document.querySelectorAll("[data-i18n]")) e.textContent = t(e.dataset.i18n);
+for (const e of document.querySelectorAll("[data-i18n-title]")) e.title = t(e.dataset.i18nTitle);
+for (const e of document.querySelectorAll("[data-i18n-aria]")) e.setAttribute("aria-label", t(e.dataset.i18nAria));
+document.title = t("page.title");
 
 let board = null, actions = null, timer = null, ticking = false, again = false, lastOk = 0;
 let gone = "";            // "", "down", "key", "stopped": why the page no longer reflects the server
-// What an action does beyond its label, said in its question; the result of these is shown open.
-const NOTES = {
-  "sweep-task": "What this task recorded and can be stopped without asking is stopped; anything marked to ask first is kept and listed in the result.",
-};
+// The result of these is shown open.
 const OPEN_OUTPUT = new Set(["inbox-seen", "sweep-task", "reap-preview", "reap"]);
 const ui = {
   asking: null,           // key of the confirm action whose question is open
@@ -286,46 +322,45 @@ function el(tag, cls, text) {
   if (text !== undefined && text !== null) e.textContent = String(text);
   return e;
 }
-function add(parent, ...kids) { for (const k of kids) if (k) parent.appendChild(typeof k === "string" ? document.createTextNode(k) : k); return parent; }
+function add(parent, ...kids) { for (const k of kids.flat()) if (k) parent.appendChild(typeof k === "string" ? document.createTextNode(k) : k); return parent; }
 function icon(kind) { const i = el("span", "ic " + kind); i.setAttribute("aria-hidden", "true"); return i; }
 function stateOf(s) { s = String(s || "").toLowerCase(); return ["running", "waiting", "done", "failed", "stopped"].includes(s) ? s : "unknown"; }
-function stateTag(s) { const k = stateOf(s); const t = el("span", "st " + k); const g = el("span", "sg " + k); g.setAttribute("aria-hidden", "true"); return add(t, g, k === "unknown" ? "not recorded" : k); }
+function stateTag(s) { const k = stateOf(s); const g = el("span", "sg " + k); g.setAttribute("aria-hidden", "true"); return add(el("span", "st " + k), g, stateWord(k)); }
 function taskKey(dir) { return String(dir).split("/").filter(Boolean).slice(-2).join("/"); }
 function anchor(dir) { return "t-" + taskKey(dir).replace(/[^A-Za-z0-9-]/g, "-"); }
 function base(p) { if (!p || p === "-") return ""; const parts = String(p).split("/").filter(Boolean); return parts[parts.length - 1] || ""; }
-function clock(d) { return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
-function ago(t) {
-  const d = new Date(t); if (!t || isNaN(d)) return "";
-  const m = Math.round((Date.now() - d) / 60000);
-  if (m < 1) return "just now"; if (m < 60) return m + " min ago";
-  const h = Math.round(m / 60); return h < 48 ? h + " h ago" : Math.round(h / 24) + " days ago";
-}
-function shortTime(t) { const d = new Date(t); return isNaN(d) ? String(t || "") : d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
-function nice(name) { return String(name).replace(/^resource\./, "").replace(/_(gb|pct)$/, "").replace(/^mem_/, "memory_").replace(/[_-]+/g, " ").replace(/^./, (c) => c.toUpperCase()); }
-function safeUrl(u) { try { const x = new URL(u); return (x.protocol === "http:" || x.protocol === "https:") ? x.href : null; } catch (e) { return null; } }
-function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+function clock(d) { return d.toLocaleTimeString(LANG, { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
 function dur(n) {
   n = Math.max(0, Math.round(n));
-  if (n < 60) return n + " s"; if (n < 3600) return Math.round(n / 60) + " min";
-  if (n < 172800) return Math.round(n / 3600) + " h"; return Math.round(n / 86400) + " days";
+  if (n < 60) return t("dur.s", { n: num(n) }); if (n < 3600) return t("dur.min", { n: num(Math.round(n / 60)) });
+  if (n < 172800) return t("dur.h", { n: num(Math.round(n / 3600)) }); return tn("dur.days", Math.round(n / 86400));
 }
+function ago(time) {
+  const d = new Date(time); if (!time || isNaN(d)) return "";
+  const s = (Date.now() - d) / 1000;
+  return s < 60 ? t("time.now") : t("time.ago", { d: dur(s < 3600 ? Math.round(s / 60) * 60 : s) });
+}
+function shortTime(v) { const d = new Date(v); return isNaN(d) ? String(v || "") : d.toLocaleString(LANG, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
+function nice(name) { return String(name).replace(/^resource\./, "").replace(/_(gb|pct)$/, "").replace(/^mem_/, "memory_").replace(/[_-]+/g, " ").replace(/^./, (c) => c.toUpperCase()); }
+function readingName(name) { const k = "reading." + String(name).replace(/^resource\./, ""); return has(k) ? t(k) : nice(name); }
+function safeUrl(u) { try { const x = new URL(u); return (x.protocol === "http:" || x.protocol === "https:") ? x.href : null; } catch (e) { return null; } }
 // A service or a reading counts in seconds; people read "11 h ago, expected every 30 min".
-function humanize(t) {
-  return String(t).replace(/\bevery (\d+) ?s\b/g, (_, n) => "expected every " + dur(+n))
-    .replace(/\b(\d+) ?s ago\b/g, (_, n) => dur(+n) + " ago").replace(/\b(\d+)s\b/g, (_, n) => dur(+n));
+function humanize(text) {
+  return String(text).replace(/\bevery (\d+) ?s\b/g, (_, n) => t("svc.every", { d: dur(+n) }))
+    .replace(/\b(\d+) ?s ago\b/g, (_, n) => t("time.ago", { d: dur(+n) })).replace(/\b(\d+)s\b/g, (_, n) => dur(+n));
 }
-// A degraded service whose status names a stalled or failing loop needs the developer.
+// A degraded service whose status names a stalled or failing loop needs the developer; the words are the data's own.
 function loopTrouble(s) { return s.state === "degraded" ? (s.detail || []).filter((l) => /\b(stalled|failing|error)\b/i.test(l)) : []; }
-function taskOf(rel) { return (board.tasks || []).find((t) => taskKey(t.dir) === rel); }
-function keyOf(rel) { const t = taskOf(rel); return t ? t.key : base(rel); }
+function taskOf(rel) { return (board.tasks || []).find((x) => taskKey(x.dir) === rel); }
+function keyOf(rel) { const x = taskOf(rel); return x ? x.key : base(rel); }
 // The machine's verdict in words, from its readings; the raw verdict only when no reading explains it.
 function machineIssues(h) {
   const out = [];
   for (const r of (h && h.readings) || []) {
-    const n = r.name, v = r.value, l = r.limit;
-    if (n === "disk_free_gb") { if (r.state === "unknown") out.push("Free disk space could not be read"); else if (r.state !== "ok") out.push("Disk free " + v + " GB, it should keep " + l + " GB"); }
-    else if (n === "mem_free_pct") { if (r.state === "unknown") out.push("Free memory could not be read"); else if (r.state !== "ok") out.push("Memory free " + v + "%, it should keep " + l + "%"); }
-    else if (r.state !== "ok" && r.state !== "unknown") out.push(nice(n) + ": " + v + ", the limit is " + l);
+    const n = r.name, v = num(r.value), l = num(r.limit);
+    if (n === "disk_free_gb") { if (r.state === "unknown") out.push(t("mi.diskUnknown")); else if (r.state !== "ok") out.push(t("mi.disk", { v, l })); }
+    else if (n === "mem_free_pct") { if (r.state === "unknown") out.push(t("mi.memUnknown")); else if (r.state !== "ok") out.push(t("mi.mem", { v, l })); }
+    else if (r.state !== "ok" && r.state !== "unknown") out.push(t("mi.other", { name: readingName(n), v, l }));
   }
   const v = String((h && h.verdict) || "");
   if (!out.length && /^unhealthy/.test(v)) out.push(v.replace(/^unhealthy:\s*/, ""));
@@ -333,9 +368,9 @@ function machineIssues(h) {
 }
 function machineWord(h) {
   const v = String((h && h.verdict) || "unknown");
-  if (v === "healthy") return "healthy";
-  if (/^unhealthy/.test(v)) return "short on room";
-  return "not read (no health reading)";
+  if (v === "healthy") return t("machine.healthy");
+  if (/^unhealthy/.test(v)) return t("machine.short");
+  return t("machine.notRead");
 }
 function announce(text) { $("announce").textContent = ""; setTimeout(() => { $("announce").textContent = text; }, 30); }
 
@@ -356,25 +391,26 @@ function showGone(why) {
   $("main").inert = !!why;
   $("live").disabled = !!why;
   if (!why) return;
-  const since = lastOk ? " What you see below is from " + clock(new Date(lastOk)) + "." : "";
+  const since = lastOk ? " " + t("gone.since", { time: clock(new Date(lastOk)) }) : "";
+  const cmd = (c) => el("code", null, c);
   if (why === "key") {
-    add(g, add(el("span"), el("b", null, "This page's key no longer works."), " The panel was started again with a new key." + since),
-      add(el("span"), "Open the address that ", el("code", null, "scripts/panel.sh url"), " prints."));
+    add(g, add(el("span"), el("b", null, t("gone.key.title")), " " + t("gone.key.body") + since),
+      add(el("span"), tnodes("gone.key.open", { cmd: cmd("scripts/panel.sh url") })));
   } else if (why === "stopped") {
-    add(g, add(el("span"), el("b", null, "You stopped the panel."), since),
-      add(el("span"), "To use it again, run ", el("code", null, "scripts/panel.sh start"), " and open the address it prints."));
+    add(g, add(el("span"), el("b", null, t("gone.stopped.title")), since),
+      add(el("span"), tnodes("gone.stopped.how", { cmd: cmd("scripts/panel.sh start") })));
   } else {
-    add(g, add(el("span"), el("b", null, "The panel server is not answering."), since + " It stops by itself after " + IDLE + " minutes without a visit."),
-      add(el("span"), "Run ", el("code", null, "scripts/panel.sh start"), " and open the address it prints; this tab cannot reconnect, because each start has a new key."));
+    add(g, add(el("span"), el("b", null, t("gone.down.title")), since + " " + t("gone.down.idle", { n: num(IDLE) })),
+      add(el("span"), tnodes("gone.down.how", { cmd: cmd("scripts/panel.sh start") })));
   }
-  fresh("off", why === "stopped" ? "Stopped" : "Not connected");
+  fresh("off", why === "stopped" ? t("fresh.stopped") : t("fresh.off"));
 }
 
 async function tick() {
   if (gone === "stopped" || gone === "key" || document.hidden) return;
   if (ticking) { again = true; return; }
   ticking = true;
-  if (board) fresh("busy", "Updating…");
+  if (board) fresh("busy", t("fresh.updating"));
   try {
     const live = $("live").checked ? "?live=1" : "";
     const [b, a] = await Promise.all([api("/api/board" + live), api("/api/actions")]);
@@ -382,14 +418,15 @@ async function tick() {
     if (gone) showGone("");
     if (b.status === 200 && b.json) { board = b.json; lastOk = Date.now(); }
     if (a.status === 200 && a.json) actions = a.json;
-    if (!board) { fresh("old", "No board yet: " + ((b.json && b.json.error) || "status " + b.status)); return; }
+    if (!board) { fresh("old", t("fresh.noBoard", { why: serverText(b.json) || t("fresh.status", { code: b.status }) })); return; }
     render();
     const gen = new Date(board.generated);
     const stale = !isNaN(gen) && Date.now() - gen > Math.max(60000, REFRESH * 3);
     const rebuilt = !board.panel || board.panel.rebuilt;
-    if (b.status !== 200) fresh("old", "Board unavailable (" + b.status + "); showing " + clock(new Date(lastOk)));
-    else if (stale || !rebuilt) fresh("old", "Board from " + (isNaN(gen) ? "an unknown time" : shortTime(board.generated)) + (rebuilt ? "" : ": rebuilding it failed"));
-    else fresh("", "Updated " + clock(new Date()));
+    const when = isNaN(gen) ? t("fresh.unknownTime") : shortTime(board.generated);
+    if (b.status !== 200) fresh("old", t("fresh.unavailable", { code: b.status, time: clock(new Date(lastOk)) }));
+    else if (stale || !rebuilt) fresh("old", t(rebuilt ? "fresh.boardFrom" : "fresh.boardFromFailed", { when }));
+    else fresh("", t("fresh.updated", { time: clock(new Date()) }));
   } catch (e) {
     showGone("down");
   } finally {
@@ -405,7 +442,7 @@ $("live").addEventListener("change", () => { tick(); });
 /* ---------- actions ---------- */
 function actionKey(a, target, group) { return [group, a.id, target.task || "", target.service || "", target.verb || ""].join("|"); }
 function globalActs(ids) { const g = (actions && actions.global) || []; return ids.map((id) => g.find((a) => a.id === id)).filter(Boolean); }
-function taskActs(dir) { const k = taskKey(dir); const t = actions && actions.tasks.find((x) => x.task === k); return t ? t.actions : []; }
+function taskActs(dir) { const k = taskKey(dir); const x = actions && actions.tasks.find((y) => y.task === k); return x ? x.actions : []; }
 function svcActs(name) { const s = actions && actions.services.find((x) => x.service === name); return s ? s.actions : []; }
 
 // One group of buttons for one thing, with its question and its last result drawn right where it was pressed.
@@ -425,7 +462,7 @@ function group(gkey, list, target, label, inResult) {
   if (r && inResult !== false) add(box, result(r, gkey));
   return box.childNodes.length ? box : null;
 }
-function asksMark() { return el("span", "asks", "asks first"); }
+function asksMark() { return el("span", "asks", t("btn.asks")); }
 // The running button stays focusable (aria-disabled), so focus does not fall to the page while it runs.
 function guardButton(b, key) {
   const mine = !!ui.running && ui.running === key;
@@ -437,9 +474,9 @@ function button(a, target, gkey) {
   const confirm = a.class === "confirm";
   const b = el("button", "btn" + (confirm ? " confirm" : "")); b.type = "button";
   b.dataset.fk = key;
-  b.title = (confirm ? "Asks first, then runs: " : "Runs at once: ") + a.command;
-  if (ui.running === key) add(b, add(el("span", "spin"), ""), "Running…");
-  else { add(b, a.label + (confirm ? "…" : "")); if (confirm) add(b, asksMark()); }
+  b.title = t(confirm ? "btn.tip.confirm" : "btn.tip.auto", { cmd: a.command });
+  if (ui.running === key) add(b, add(el("span", "spin"), ""), t("btn.running"));
+  else { add(b, actionLabel(a) + (confirm ? "…" : "")); if (confirm) add(b, asksMark()); }
   guardButton(b, key);
   b.addEventListener("click", () => {
     if (ui.running || gone) return;
@@ -449,17 +486,19 @@ function button(a, target, gkey) {
   return b;
 }
 function ask(a, target, gkey) {
-  const key = actionKey(a, target, gkey);
+  const key = actionKey(a, target, gkey), label = actionLabel(a);
   const box = el("div", "ask"); box.tabIndex = -1; box.dataset.fk = "ask:" + key;
-  box.setAttribute("role", "group"); box.setAttribute("aria-label", "Confirm: " + a.label);
-  const what = target.task ? " for " + keyOf(target.task) : target.service ? " on " + target.service : "";
-  add(box, el("div", "q", a.label + what + "?"));
-  add(box, add(el("div", "d"), "This runs ", el("code", null, a.command), ". " + (NOTES[a.id] ? NOTES[a.id] + " " : "") + "Nothing is sent until you press the button below."));
+  box.setAttribute("role", "group"); box.setAttribute("aria-label", t("ask.label", { action: label }));
+  const q = target.task ? t("ask.q.task", { action: label, target: keyOf(target.task) })
+    : target.service ? t("ask.q.service", { action: label, target: target.service }) : t("ask.q", { action: label });
+  add(box, el("div", "q", q));
+  const note = "action." + a.id + ".note";
+  add(box, add(el("div", "d"), tnodes("ask.runs", { cmd: el("code", null, a.command) }), has(note) ? " " + t(note) : "", " " + t("ask.nothing")));
   const row = el("div", "acts");
-  const go = el("button", "btn primary", "Yes, " + a.label.charAt(0).toLowerCase() + a.label.slice(1)); go.type = "button"; go.dataset.fk = "go:" + key;
+  const go = el("button", "btn primary", t("ask.yes", { action: label.charAt(0).toLowerCase() + label.slice(1) })); go.type = "button"; go.dataset.fk = "go:" + key;
   go.disabled = !!ui.running || !!gone;
   go.addEventListener("click", () => { if (ui.running || gone) return; ui.asking = null; press(a, target, true, gkey); });
-  const no = el("button", "btn quiet", "Cancel"); no.type = "button"; no.dataset.fk = "no:" + key;
+  const no = el("button", "btn quiet", t("ask.cancel")); no.type = "button"; no.dataset.fk = "no:" + key;
   no.addEventListener("click", cancelAsk);
   box.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); cancelAsk(); } });
   return add(box, add(row, go, no));
@@ -469,8 +508,8 @@ function cancelAsk() { const back = ui.returnFocus; ui.asking = null; render(); 
 function chooseButton(list, target, gkey) {
   const b = el("button", "btn confirm"); b.type = "button"; b.dataset.fk = "choose:" + gkey;
   const runs = list.some((a) => ui.running === actionKey(a, target(a), gkey));
-  b.title = "Asks which part, then asks before it runs";
-  if (runs) add(b, add(el("span", "spin"), ""), "Running…"); else add(b, "Restart…", asksMark());
+  b.title = t("choose.tip");
+  if (runs) add(b, add(el("span", "spin"), ""), t("btn.running")); else add(b, t("choose.restart"), asksMark());
   b.disabled = !!gone || (!!ui.running && !runs);
   if (runs) b.setAttribute("aria-disabled", "true");
   b.addEventListener("click", () => { if (ui.running || gone) return; ui.choosing = gkey; ui.asking = null; delete ui.results[gkey]; render(); focusKey("pick:" + gkey); });
@@ -478,18 +517,18 @@ function chooseButton(list, target, gkey) {
 }
 function chooser(list, target, gkey) {
   const box = el("div", "ask"); box.tabIndex = -1; box.dataset.fk = "pick:" + gkey;
-  box.setAttribute("role", "group"); box.setAttribute("aria-label", "Restart which part?");
-  add(box, el("div", "q", "Restart which part?"), el("div", "d", "Each one asks again before it runs."));
+  box.setAttribute("role", "group"); box.setAttribute("aria-label", t("choose.q"));
+  add(box, el("div", "q", t("choose.q")), el("div", "d", t("choose.d")));
   const row = el("div", "acts");
   for (const a of list) {
     const key = actionKey(a, target(a), gkey);
-    const b = el("button", "btn confirm"); b.type = "button"; b.dataset.fk = "opt:" + key; b.title = "Asks first, then runs: " + a.command;
-    add(b, a.label + "…");
+    const b = el("button", "btn confirm"); b.type = "button"; b.dataset.fk = "opt:" + key; b.title = t("btn.tip.confirm", { cmd: a.command });
+    add(b, actionLabel(a) + "…");
     b.disabled = !!ui.running || !!gone;
     b.addEventListener("click", () => { if (ui.running || gone) return; ui.choosing = null; ui.asking = key; ui.returnFocus = "choose:" + gkey; render(); focusKey("ask:" + key); });
     add(row, b);
   }
-  const no = el("button", "btn quiet", "Cancel"); no.type = "button"; no.dataset.fk = "nopick:" + gkey;
+  const no = el("button", "btn quiet", t("ask.cancel")); no.type = "button"; no.dataset.fk = "nopick:" + gkey;
   const close = () => { ui.choosing = null; render(); focusKey("choose:" + gkey); };
   no.addEventListener("click", close);
   box.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } });
@@ -499,23 +538,24 @@ function result(r, gkey) {
   const box = el("div", "res" + (r.ok ? "" : " fail")); box.setAttribute("role", "status");
   box.tabIndex = -1; box.dataset.fk = "res:" + gkey;
   const head = el("div", "res-head");
-  const word = r.ok ? "Done" : r.status === 200 ? "Failed, exit " + r.exit : r.status === 409 ? "Already running" : r.status ? "Refused (" + r.status + ")" : "No answer from the panel";
+  const word = r.ok ? t("res.done") : r.status === 200 ? t("res.failed", { code: r.exit }) : r.status === 409 ? t("res.already")
+    : r.status ? t("res.refused", { code: r.status }) : t("res.noAnswer");
   add(head, add(el("span", "st " + (r.ok ? "done" : "failed")), add(el("span", "sg " + (r.ok ? "done" : "failed")), ""), word),
     add(el("span", "grow"), r.label), el("span", "empty", clock(r.at)));
-  const x = el("button", "btn quiet", "Dismiss"); x.type = "button"; x.dataset.fk = "dismiss:" + gkey;
+  const x = el("button", "btn quiet", t("res.dismiss")); x.type = "button"; x.dataset.fk = "dismiss:" + gkey;
   x.addEventListener("click", () => { delete ui.results[gkey]; render(); });
   add(box, add(head, x));
   if (r.text) {
     const kept = r.id === "sweep-task" ? r.text.split("\n").filter((l) => /: kept\b/.test(l)).length : 0;
-    if (kept) add(box, el("p", "empty", plural(kept, "thing") + " kept: each asks first, and the panel never stops those."));
+    if (kept) add(box, el("p", "empty", tn("res.kept", kept)));
     if (r.ok && !OPEN_OUTPUT.has(r.id) && r.text.split("\n").length > 4) {
-      const d = el("details"); add(d, el("summary", null, "Output"), el("pre", null, r.text)); add(box, d);
+      const d = el("details"); add(d, el("summary", null, t("res.output")), el("pre", null, r.text)); add(box, d);
     } else add(box, el("pre", null, r.text));
   }
   return box;
 }
 async function press(a, target, confirmed, gkey) {
-  const key = actionKey(a, target, gkey);
+  const key = actionKey(a, target, gkey), label = actionLabel(a);
   ui.running = key; delete ui.results[gkey]; render();
   if (!focusKey(key)) focusKey("choose:" + gkey);
   const body = { id: a.id, task: target.task || "", service: target.service || "", verb: target.verb || "", until: target.until || "", confirmed };
@@ -524,9 +564,10 @@ async function press(a, target, confirmed, gkey) {
   ui.running = null;
   if (r.status === 428) { ui.asking = key; render(); focusKey("ask:" + key); return; }
   const ok = r.status === 200 && r.json && r.json.exit === 0;
-  const text = r.json ? (r.json.output !== undefined ? r.json.output : r.json.error) : "";
-  ui.results[gkey] = { ok, id: a.id, status: r.status, exit: r.json && r.json.exit, label: a.label, text: (text || "").trim(), at: new Date() };
-  announce(a.label + (ok ? ": done" : ": failed"));
+  // A script's own output stays as it printed it; a message the server wrote has words in the table.
+  const text = r.json ? (r.json.code ? serverText(r.json) : r.json.output !== undefined ? r.json.output : r.json.error) : "";
+  ui.results[gkey] = { ok, id: a.id, status: r.status, exit: r.json && r.json.exit, label, text: (text || "").trim(), at: new Date() };
+  announce(t(ok ? "res.announce.done" : "res.announce.failed", { action: label }));
   if (a.id === "panel-stop" && ok) { clearTimeout(timer); showGone("stopped"); return; }
   render(); focusKey("dismiss:" + gkey);
   await tick();
@@ -545,27 +586,27 @@ function part(id, input, draw) {
   box.replaceChildren(); draw(box);
   if (fk) focusKey(fk);
 }
-function fold(key, name, summary, sumCls, fill) {
+function fold(key, name, summary, sumCls, fillBody) {
   const d = el("details"); d.dataset.fold = key;
   if (ui.open.has(key)) d.open = true;
   d.addEventListener("toggle", () => { if (d.open) ui.open.add(key); else ui.open.delete(key); });
   const s = el("summary"); s.dataset.fk = "fold:" + key;
   add(s, el("span", "name", name), el("span", "s " + (sumCls || ""), summary));
-  const body = el("div", "body"); fill(body);
+  const body = el("div", "body"); fillBody(body);
   return add(d, s, body);
 }
 
 function render() {
   if (!board) return;
   const tasks = board.tasks || [], services = board.services || [], health = board.health || {};
-  part("attn", [tasks.map((t) => [t.key, t.dir, t.title, t.stage, t.waiting_on, t.needs_developer, t.hold_merge, (t.agents || []).map((a) => a.state)]),
+  part("attn", [tasks.map((x) => [x.key, x.dir, x.title, x.stage, x.waiting_on, x.needs_developer, x.hold_merge, (x.agents || []).map((a) => a.state)]),
     board.inbox, board.hold_all, health, services.map((s) => [s.name, s.state, s.detail]), board.panel && board.panel.closed, actions], drawAttention);
-  const agents = tasks.flatMap((t) => t.agents || []);
+  const agents = tasks.flatMap((x) => x.agents || []);
   const count = (s) => agents.filter((a) => stateOf(a.state) === s).length;
-  $("tasks-sum").textContent = tasks.length ? [plural(tasks.length, "task"), count("running") + " agents running", count("waiting") + " waiting"].join(" · ") : "";
+  $("tasks-sum").textContent = tasks.length ? [tn("tasks.count", tasks.length), tn("tasks.running", count("running")), t("tasks.waiting", { n: num(count("waiting")) })].join(" · ") : "";
   part("tasks", [tasks, actions && actions.tasks, board.panel && board.panel.ledgers], (box) => {
-    if (!tasks.length) { add(box, el("p", "calm", "No open tasks. A new request starts one.")); return; }
-    for (const t of tasks) add(box, drawTask(t));
+    if (!tasks.length) { add(box, el("p", "calm", t("tasks.none"))); return; }
+    for (const x of tasks) add(box, drawTask(x));
   });
   part("more", [services, actions && actions.services, health, board.resources, board.problems, board.panel && board.panel.closed, actions && actions.global, board.hold_all], drawMore);
 }
@@ -573,26 +614,26 @@ function render() {
 function drawAttention(box) {
   const tasks = board.tasks || [], items = [];
   const openServices = () => { ui.open.add("services"); shown.more = ""; render(); const f = document.querySelector('[data-fold="services"]'); if (f) { f.scrollIntoView({ block: "start" }); focusKey("fold:services"); } };
-  for (const t of tasks.filter((x) => x.needs_developer)) {
-    const w = String(t.waiting_on || "").trim();
+  const link = (x) => { const a = el("a", null, x.key); a.href = "#" + anchor(x.dir); return a; };
+  for (const x of tasks.filter((y) => y.needs_developer)) {
+    const w = String(x.waiting_on || "").trim();
     const mine = /^(developer|you)\s*:\s*/i.test(w);
     const li = el("li", "attn-item"); add(li, icon("warn"));
-    add(li, el("div", "what", mine ? w.replace(/^(developer|you)\s*:\s*/i, "").replace(/^./, (c) => c.toUpperCase()) : (w ? "Waiting on " + w : "Waiting on you")));
-    const a = el("a", null, t.key); a.href = "#" + anchor(t.dir);
-    add(li, add(el("div", "ctx"), a, " · " + t.title + " · stage " + (t.stage || "unknown")));
+    add(li, el("div", "what", mine ? w.replace(/^(developer|you)\s*:\s*/i, "").replace(/^./, (c) => c.toUpperCase()) : (w ? t("attn.waitingOn", { who: w }) : t("attn.waitingYou"))));
+    add(li, add(el("div", "ctx"), link(x), " · " + x.title + " · " + t("attn.stage", { stage: stageWord(x.stage) })));
     items.push(li);
   }
   const unseen = (board.inbox || []).filter((i) => !i.seen);
   if (unseen.length) {
     const li = el("li", "attn-item"); add(li, icon("inbox"));
-    add(li, el("div", "what", plural(unseen.length, "handoff") + " finished and not yet read"));
+    add(li, el("div", "what", tn("attn.inbox", unseen.length)));
     const ul = el("ul");
     for (const i of unseen) {
-      const rel = taskKey(i.task), t = taskOf(rel), c = ((board.panel && board.panel.closed) || []).find((x) => x.task === rel);
+      const rel = taskKey(i.task), x = taskOf(rel), c = ((board.panel && board.panel.closed) || []).find((y) => y.task === rel);
       const row = el("li");
-      if (t) { const a = el("a", null, t.key); a.href = "#" + anchor(t.dir); add(row, a, " · " + t.title); }
-      else add(row, c ? (c.key && c.key !== "-" ? c.key : base(rel)) + " · " + c.title + " (closed)" : base(i.task));
-      add(row, ", from " + i.from + ", " + (ago(i.time) || i.time));
+      if (x) add(row, link(x), " · " + x.title);
+      else add(row, c ? (c.key && c.key !== "-" ? c.key : base(rel)) + " · " + t("attn.closed", { title: c.title }) : base(i.task));
+      add(row, ", " + t("attn.from", { from: i.from, when: ago(i.time) || i.time }));
       add(ul, row);
     }
     // Only what is listed here is marked: the newest time shown goes with the press.
@@ -602,32 +643,31 @@ function drawAttention(box) {
   }
   if (board.hold_all) {
     const li = el("li", "attn-item"); add(li, icon("lock"));
-    add(li, el("div", "what", "Every merge is on hold"), el("div", "ctx", "Nothing merges anywhere until you lift it."), group("attn:holdall", globalActs(["hold-all-off"]), {}, null, false));
+    add(li, el("div", "what", t("attn.holdAll")), el("div", "ctx", t("attn.holdAll.ctx")), group("attn:holdall", globalActs(["hold-all-off"]), {}, null, false));
     items.push(li);
   }
-  for (const t of tasks.filter((x) => x.hold_merge)) {
+  for (const x of tasks.filter((y) => y.hold_merge)) {
     const li = el("li", "attn-item"); add(li, icon("lock"));
-    const a = el("a", null, t.key); a.href = "#" + anchor(t.dir);
-    add(li, add(el("div", "what"), "Merges held for ", a), el("div", "ctx", t.title));
-    add(li, group("attn:hold:" + taskKey(t.dir), taskActs(t.dir).filter((x) => x.id === "hold-off"), { task: taskKey(t.dir) }, null, false));
+    add(li, add(el("div", "what"), tnodes("attn.held", { task: link(x) })), el("div", "ctx", x.title));
+    add(li, group("attn:hold:" + taskKey(x.dir), taskActs(x.dir).filter((a) => a.id === "hold-off"), { task: taskKey(x.dir) }, null, false));
     items.push(li);
   }
   const health = board.health || {};
   if (/^unhealthy/.test(String(health.verdict || ""))) {
     const li = el("li", "attn-item"); add(li, icon("warn"));
-    add(li, el("div", "what", "The machine is short on room: launch nothing new"), el("div", "ctx", machineIssues(health).join("; ")));
+    add(li, el("div", "what", t("attn.machine")), el("div", "ctx", machineIssues(health).join("; ")));
     items.push(li);
   }
   for (const s of (board.services || [])) {
     const trouble = loopTrouble(s);
     if (s.state !== "down" && !trouble.length) continue;
     const li = el("li", "attn-item"); add(li, icon("warn"));
-    if (s.state === "down") add(li, el("div", "what", s.name + " is down"), el("div", "ctx", humanize((s.detail || []).filter(Boolean)[0] || "No detail from its status.")));
+    if (s.state === "down") add(li, el("div", "what", t("attn.svcDown", { name: s.name })), el("div", "ctx", humanize((s.detail || []).filter(Boolean)[0] || t("attn.svcNoDetail"))));
     else {
-      add(li, el("div", "what", s.name + ": " + (trouble.length === 1 ? humanize(trouble[0]) : plural(trouble.length, "loop") + " stalled or failing")));
+      add(li, el("div", "what", s.name + ": " + (trouble.length === 1 ? humanize(trouble[0]) : tn("attn.loops", trouble.length))));
       if (trouble.length > 1) { const ul = el("ul"); for (const l of trouble) add(ul, el("li", null, humanize(l))); add(li, ul); }
     }
-    const go = el("button", "fold", "Show its controls"); go.type = "button"; go.dataset.fk = "svc-go:" + s.name;
+    const go = el("button", "fold", t("attn.showControls")); go.type = "button"; go.dataset.fk = "svc-go:" + s.name;
     go.addEventListener("click", openServices);
     add(li, add(el("div", "acts"), go));
     items.push(li);
@@ -636,42 +676,44 @@ function drawAttention(box) {
   const slot = el("div", "attn-res");
   for (const k of Object.keys(ui.results).filter((x) => x.startsWith("attn:"))) add(slot, result(ui.results[k], k));
   if (!items.length) {
-    const running = tasks.flatMap((t) => t.agents || []).filter((a) => stateOf(a.state) === "running").length;
-    const c = el("p", "calm"); add(c, icon("ok"), "Nothing needs you. " + (running ? plural(running, "agent") + " running" : "No agent running") + "; machine " + machineWord(health) + ".");
+    const running = tasks.flatMap((x) => x.agents || []).filter((a) => stateOf(a.state) === "running").length;
+    const c = el("p", "calm");
+    add(c, icon("ok"), t("calm.line", { running: running ? tn("calm.running", running) : t("calm.noneRunning"), word: machineWord(health) }));
     add(box, add(el("div", "calm-wrap"), slot, c)); return;
   }
   const wrap = el("div", "attn");
-  add(wrap, add(el("div", "sec-head"), el("h2", null, "Needs you"), el("span", "sum", String(items.length))));
+  add(wrap, add(el("div", "sec-head"), el("h2", null, t("sec.needs")), el("span", "sum", num(items.length))));
   add(wrap, slot, add(el("ul", "attn-list"), ...items));
   add(box, wrap);
 }
 
-function drawTask(t) {
-  const tk = taskKey(t.dir);
-  const card = el("article", "task" + (t.needs_developer ? " needs" : "")); card.id = anchor(t.dir);
-  card.setAttribute("aria-label", t.key + ": " + t.title);
+function drawTask(x) {
+  const tk = taskKey(x.dir);
+  const card = el("article", "task" + (x.needs_developer ? " needs" : "")); card.id = anchor(x.dir);
+  card.setAttribute("aria-label", x.key + ": " + x.title);
   const meta = el("div", "t-meta");
-  add(meta, el("span", "t-key", t.key), el("span", null, t.scope || tk.split("/")[0]));
-  if (t.needs_developer) add(meta, add(el("span", "pill attn"), icon("warn"), "Needs you"));
-  if (t.hold_merge) add(meta, add(el("span", "pill bad"), "Merges held"));
-  add(card, meta, el("h3", "t-title", t.title));
-  const st = el("div", "stage"); const i = STAGES.indexOf(t.stage);
+  add(meta, el("span", "t-key", x.key), el("span", null, x.scope || tk.split("/")[0]));
+  if (x.needs_developer) add(meta, add(el("span", "pill attn"), icon("warn"), t("sec.needs")));
+  if (x.hold_merge) add(meta, add(el("span", "pill bad"), t("task.held")));
+  add(card, meta, el("h3", "t-title", x.title));
+  const st = el("div", "stage"); const i = STAGES.indexOf(x.stage);
   if (i >= 0) {
     const tr = el("span", "track"); tr.setAttribute("aria-hidden", "true");
     STAGES.forEach((_, n) => add(tr, el("i", n < i ? "past" : n === i ? "now" : "")));
     add(st, tr);
   }
-  add(st, add(el("span"), "Stage ", el("b", null, t.stage || "unknown"), i >= 0 ? " (" + (i + 1) + " of " + STAGES.length + ")" : ""));
-  const lh = t.last_handoff || {};
-  if (lh.file) add(st, el("span", "empty", "last handoff " + (ago(lh.written) || lh.written)));
+  add(st, add(el("span"), tnodes("task.stage", { stage: el("b", null, stageWord(x.stage)) }), i >= 0 ? " " + t("task.stageOf", { i: num(i + 1), n: num(STAGES.length) }) : ""));
+  const lh = x.last_handoff || {};
+  if (lh.file) add(st, el("span", "empty", t("task.lastHandoff", { when: ago(lh.written) || lh.written })));
   add(card, st);
-  if (t.waiting_on) {
-    const w = String(t.waiting_on).trim(), mine = /^(developer|you)\s*:\s*/i.test(w);
-    add(card, add(el("p", "waiting-on"), el("span", null, mine ? "Waiting on you: " : "Waiting on "), mine ? w.replace(/^(developer|you)\s*:\s*/i, "") : w));
+  if (x.waiting_on) {
+    const w = String(x.waiting_on).trim(), mine = /^(developer|you)\s*:\s*/i.test(w);
+    // The table's words are muted; the record's own words are not.
+    add(card, add(el("p", "waiting-on"), tnodes(mine ? "task.waitingYou" : "task.waitingOn", { what: document.createTextNode(mine ? w.replace(/^(developer|you)\s*:\s*/i, "") : w) }, true)));
   }
 
-  const agents = t.agents || [];
-  if (!agents.length) add(card, el("p", "empty", "No agents launched yet."));
+  const agents = x.agents || [];
+  if (!agents.length) add(card, el("p", "empty", t("task.noAgents")));
   else {
     const counts = {}; for (const a of agents) counts[stateOf(a.state)] = (counts[stateOf(a.state)] || 0) + 1;
     const fin = agents.filter((a) => FINISHED.has(stateOf(a.state))).length;
@@ -681,14 +723,14 @@ function drawTask(t) {
     const cs = el("div", "counts");
     for (const s of ["running", "waiting", "failed", "done", "stopped", "unknown"]) {
       if (!counts[s] || folds && FINISHED.has(s)) continue;
-      add(cs, s === "unknown" ? add(el("span", "unrec"), plural(counts[s], "agent") + ", state not recorded") : add(stateTag(s), " " + counts[s]));
+      add(cs, s === "unknown" ? el("span", "unrec", tn("task.unrec", counts[s])) : add(stateTag(s), " " + num(counts[s])));
     }
     if (folds) {
-      for (const s of ["done", "stopped"]) if (counts[s]) add(cs, add(stateTag(s), " " + counts[s]));
-      if (counts.unknown) add(cs, add(el("span", "unrec"), plural(counts.unknown, "earlier agent") + ", state not recorded"));
-      const b = el("button", "fold", showAll ? "Hide" : "Show");
+      for (const s of ["done", "stopped"]) if (counts[s]) add(cs, add(stateTag(s), " " + num(counts[s])));
+      if (counts.unknown) add(cs, el("span", "unrec", tn("task.earlier", counts.unknown)));
+      const b = el("button", "fold", t(showAll ? "task.hide" : "task.show"));
       b.type = "button"; b.dataset.fk = "exp:" + tk; b.setAttribute("aria-expanded", String(showAll));
-      b.setAttribute("aria-label", (showAll ? "Hide " : "Show ") + plural(fin, "folded agent"));
+      b.setAttribute("aria-label", tn(showAll ? "task.hideN" : "task.showN", fin));
       b.addEventListener("click", () => { if (ui.expanded.has(tk)) ui.expanded.delete(tk); else ui.expanded.add(tk); render(); });
       add(cs, b);
     }
@@ -697,26 +739,26 @@ function drawTask(t) {
   }
 
   const ledger = (board.panel && board.panel.ledgers && board.panel.ledgers[tk]) || [];
-  const acts = taskActs(t.dir);
+  const acts = taskActs(x.dir);
   const d = el("details", "more-t"); const fk = "task-detail:" + tk;
   if (ui.open.has(fk)) d.open = true;
   d.addEventListener("toggle", () => { if (d.open) ui.open.add(fk); else ui.open.delete(fk); });
-  const s = el("summary", null, acts.length ? "Details, ledger and actions" : "Details and recent ledger"); s.dataset.fk = "fold:" + fk;
+  const s = el("summary", null, t(acts.length ? "task.detailsActs" : "task.details")); s.dataset.fk = "fold:" + fk;
   const facts = el("dl", "facts");
-  const fact = (k, v) => { if (v) add(facts, el("dt", null, k), el("dd", null, v)); };
-  fact("Folder", tk); fact("Complexity", t.complexity !== "unknown" ? t.complexity : "");
-  fact("Repositories", t.repositories); fact("Merge requests", t.merge_requests);
-  fact("Last handoff", lh.file ? lh.file + ", " + lh.from + " to " + lh.to + ", " + shortTime(lh.written) : "");
-  fact("Created", shortTime(t.created));
+  const fact = (k, v) => { if (v) add(facts, el("dt", null, t(k)), el("dd", null, v)); };
+  fact("fact.folder", tk); fact("fact.complexity", x.complexity !== "unknown" ? x.complexity : "");
+  fact("fact.repos", x.repositories); fact("fact.mrs", x.merge_requests);
+  fact("fact.lastHandoff", lh.file ? t("fact.handoff", { file: lh.file, from: lh.from, to: lh.to, when: shortTime(lh.written) }) : "");
+  fact("fact.created", shortTime(x.created));
   add(d, s, facts);
   if (ledger.length) {
-    add(d, el("p", "sub", "Ledger, newest last"));
+    add(d, el("p", "sub", t("task.ledger")));
     const ul = el("ul", "lines");
     for (const l of ledger) add(ul, add(el("li"), el("span", "t", shortTime(l.time)), el("span", "e", l.event), l.text));
     add(d, ul);
   }
   // A result or an open question keeps the fold open, so it is never hidden behind the summary.
-  const g = group("task:" + tk, acts, { task: tk }, "Actions on this task");
+  const g = group("task:" + tk, acts, { task: tk }, t("task.acts"));
   if (g) { add(d, g); if (ui.results["task:" + tk] || acts.some((a) => ui.asking === actionKey(a, { task: tk }, "task:" + tk))) d.open = true; }
   add(card, d);
   return card;
@@ -738,12 +780,12 @@ function tree(agents, showAll) {
     drawn.add(a);
     const li = el("li");
     const r = el("div", "ag-row");
-    r.title = [a.thread, a.branch && a.branch !== "-" ? "branch " + a.branch : "", a.worktree && a.worktree !== "-" ? a.worktree : a.repo].filter(Boolean).join("\n");
+    r.title = [a.thread, a.branch && a.branch !== "-" ? t("tree.branch", { branch: a.branch }) : "", a.worktree && a.worktree !== "-" ? a.worktree : a.repo].filter(Boolean).join("\n");
     const where = base(a.worktree) || base(a.repo);
     const branch = a.branch && a.branch !== "-" ? a.branch : "";
     add(r, stateTag(a.state), el("span", "ag-role", a.role), el("span", "ag-where", [where, branch && branch !== where ? branch : ""].filter(Boolean).join(" · ") || "-"));
-    const m = el("span", "ag-model", [String(a.model || "").replace(/^claude-/, ""), a.effort].filter((x) => x && x !== "-").join(" · "));
-    if (a.live) add(m, " · live: " + a.live);
+    const m = el("span", "ag-model", [String(a.model || "").replace(/^claude-/, ""), a.effort].filter((v) => v && v !== "-").join(" · "));
+    if (a.live) add(m, " · " + t("tree.live", { state: a.live }));
     add(r, m);
     li.appendChild(r);
     const ch = kids(a).filter((b) => !drawn.has(b) && wanted(b, new Set()));
@@ -764,50 +806,51 @@ function drawMore(box) {
   if (services.length) {
     const worst = services.find((s) => s.state === "down") || services.find((s) => s.state !== "ok") || services[0];
     const flag = (s) => s.state === "ok" ? "" : ((s.detail || []).find((l) => /stalled|\bdown\b|\berror|\bnot running/i.test(l)) || "");
-    const sum = services.map((s) => s.name + " " + (s.state || "unknown") + (flag(s) ? " (" + humanize(flag(s)) + ")" : "")).join(" · ");
-    add(box, fold("services", "Services", sum, worst.state === "ok" ? "" : worst.state === "down" ? "bad" : "warn", (b) => { for (const s of services) add(b, drawService(s)); }));
+    const sum = services.map((s) => s.name + " " + svcWord(s.state) + (flag(s) ? " (" + humanize(flag(s)) + ")" : "")).join(" · ");
+    add(box, fold("services", t("more.services"), sum, worst.state === "ok" ? "" : worst.state === "down" ? "bad" : "warn", (b) => { for (const s of services) add(b, drawService(s)); }));
   }
 
   const v = String(health.verdict || "unknown");
   const readings = (health.readings || []).filter((r) => !/^resource\./.test(r.name));
-  const free = readings.filter((r) => /_free_/.test(r.name) && r.state !== "unknown").map((r) => " · " + nice(r.name).toLowerCase() + " " + r.value + (/_pct$/.test(r.name) ? "%" : /_gb$/.test(r.name) ? " GB" : "")).join("");
-  const sumM = v === "healthy" ? "Healthy" + free : /^unhealthy/.test(v) ? machineIssues(health).join("; ") : "Not read: no health reading";
-  add(box, fold("machine", "Machine", sumM, /^unhealthy/.test(v) ? "bad" : "", (b) => {
-    if (!readings.length && !resources.length) add(b, el("p", "empty", "No health reading on the board yet: scripts/health.sh did not answer when the board was built."));
+  const unit = (n) => (/_pct$/.test(n) ? "%" : /_gb$/.test(n) ? " GB" : "");
+  const free = readings.filter((r) => /_free_/.test(r.name) && r.state !== "unknown").map((r) => " · " + readingName(r.name).toLowerCase() + " " + num(r.value) + unit(r.name)).join("");
+  const sumM = v === "healthy" ? t("machine.sumHealthy") + free : /^unhealthy/.test(v) ? machineIssues(health).join("; ") : t("machine.sumNotRead");
+  add(box, fold("machine", t("more.machine"), sumM, /^unhealthy/.test(v) ? "bad" : "", (b) => {
+    if (!readings.length && !resources.length) add(b, add(el("p", "empty"), tnodes("machine.noReading", { cmd: el("code", null, "scripts/health.sh") })));
     const ms = el("div", "meters");
     for (const r of readings) {
-      const unit = /_pct$/.test(r.name) ? "%" : /_gb$/.test(r.name) ? " GB" : "";
-      if (/_free_/.test(r.name)) meter(ms, nice(r.name), null, r.value + unit + " (keeps " + r.limit + unit + ")", r.state);
-      else if (!resources.some((x) => x.kind === r.name)) meter(ms, nice(r.name), [r.value, r.limit], r.value + " of " + r.limit, r.state);
+      const u = unit(r.name);
+      if (/_free_/.test(r.name)) meter(ms, readingName(r.name), null, t("meter.keeps", { v: num(r.value) + u, l: num(r.limit) + u }), r.state);
+      else if (!resources.some((x) => x.kind === r.name)) meter(ms, readingName(r.name), [r.value, r.limit], t("meter.of", { n: num(r.value), l: num(r.limit) }), r.state);
     }
-    for (const r of resources) meter(ms, nice(r.kind), [r.count, r.limit], r.count + " of " + r.limit, r.state, r.orphans);
+    for (const r of resources) meter(ms, readingName(r.kind), [r.count, r.limit], t("meter.of", { n: num(r.count), l: num(r.limit) }), r.state, r.orphans);
     add(b, ms);
   }));
 
   const orph = resources.reduce((n, r) => n + (r.orphans || []).length, 0);
-  add(box, fold("cleanup", "Cleanup", orph ? plural(orph, "leftover") + " that no open task owns" : "Nothing left over", "", (b) => {
-    add(b, el("p", "empty", "The preview lists what the cleanup would stop or delete. The cleanup never touches a row marked to ask first."));
-    for (const r of resources.filter((x) => (x.orphans || []).length)) add(b, add(el("ul", "lines"), add(el("li"), el("span", "e", nice(r.kind)), r.orphans.join(", "))));
+  add(box, fold("cleanup", t("more.cleanup"), orph ? tn("cleanup.orph", orph) : t("cleanup.none"), "", (b) => {
+    add(b, el("p", "empty", t("cleanup.note")));
+    for (const r of resources.filter((x) => (x.orphans || []).length)) add(b, add(el("ul", "lines"), add(el("li"), el("span", "e", readingName(r.kind)), r.orphans.join(", "))));
     add(b, group("more:cleanup", globalActs(["reap-preview", "reap"]), {}));
   }));
 
-  add(box, fold("problems", "Record problems", probs.length ? plural(probs.length, "problem") : "None", probs.length ? "warn" : "", (b) => {
-    if (!probs.length) { add(b, el("p", "empty", "The task records agree with each other.")); return; }
+  add(box, fold("problems", t("more.problems"), probs.length ? tn("problems.count", probs.length) : t("problems.none"), probs.length ? "warn" : "", (b) => {
+    if (!probs.length) { add(b, el("p", "empty", t("problems.agree"))); return; }
     const ul = el("ul", "lines");
     for (const p of probs) add(ul, add(el("li"), el("span", "e", p.kind), p.text));
     add(b, ul);
   }));
 
-  add(box, fold("closed", "Closed tasks", closed.length ? plural(closed.length, "task") + (closed.length >= 30 ? ", newest first" : "") : "None yet", "", (b) => {
-    if (!closed.length) { add(b, el("p", "empty", "No task has been closed yet.")); return; }
+  add(box, fold("closed", t("more.closed"), closed.length ? (closed.length >= 30 ? t("closed.countNewest", { n: num(closed.length) }) : tn("closed.count", closed.length)) : t("closed.none"), "", (b) => {
+    if (!closed.length) { add(b, el("p", "empty", t("closed.empty"))); return; }
     const ul = el("ul", "lines");
-    for (const c of closed) add(ul, add(el("li"), el("span", "t", shortTime(c.last)), el("span", "e", c.key && c.key !== "-" ? c.key : base(c.task)), c.title + (c.stage && c.stage !== "done" ? " (closed at " + c.stage + ")" : "")));
+    for (const c of closed) add(ul, add(el("li"), el("span", "t", shortTime(c.last)), el("span", "e", c.key && c.key !== "-" ? c.key : base(c.task)), c.stage && c.stage !== "done" ? t("closed.at", { title: c.title, stage: stageWord(c.stage) }) : c.title));
     add(b, ul);
   }));
 
-  add(box, fold("panel", "Panel and merges", board.hold_all ? "Every merge is on hold" : "Refresh, hold every merge, stop the panel", board.hold_all ? "bad" : "", (b) => {
+  add(box, fold("panel", t("more.panel"), board.hold_all ? t("attn.holdAll") : t("panel.sum"), board.hold_all ? "bad" : "", (b) => {
     add(b, group("more:panel", globalActs(["refresh", "hold-all-on", "hold-all-off", "panel-stop"]), {}));
-    add(b, el("p", "empty", "The panel stops by itself after " + IDLE + " minutes without a visit. Every press is written to the panel log, and a task's press to its ledger."));
+    add(b, el("p", "empty", t("panel.note", { n: num(IDLE) })));
   }));
 }
 
@@ -821,20 +864,21 @@ function meter(box, name, pair, fig, state, orphans) {
     const i = el("i"); i.style.width = Math.min(100, (n / l) * 100) + "%"; add(bar, i);
     bar.setAttribute("role", "img"); bar.setAttribute("aria-label", fig);
   } else bar.style.visibility = "hidden";
-  add(m, bar, el("span", "fig", fig + (over ? " · " + state.toLowerCase() : state === "unknown" ? " · not read" : "")));
-  if (orphans && orphans.length) add(m, el("span", "orph", plural(orphans.length, "leftover") + ": " + orphans.slice(0, 6).join(", ") + (orphans.length > 6 ? ", …" : "")));
+  const word = over ? (has("meter." + state) ? t("meter." + state) : String(state).toLowerCase()) : state === "unknown" ? t("meter.notRead") : "";
+  add(m, bar, el("span", "fig", fig + (word ? " · " + word : "")));
+  if (orphans && orphans.length) add(m, el("span", "orph", tn("meter.leftovers", orphans.length, { list: orphans.slice(0, 6).join(", ") + (orphans.length > 6 ? ", …" : "") })));
   add(box, m);
 }
 
 function drawService(s) {
   const box = el("div", "svc");
-  add(box, add(el("div", "svc-head"), el("b", null, s.name), el("span", "state-word " + (s.state || "unknown"), s.state || "unknown")));
+  add(box, add(el("div", "svc-head"), el("b", null, s.name), el("span", "state-word " + (s.state || "unknown"), svcWord(s.state))));
   const det = (s.detail || []).filter(Boolean);
   if (det.length) { const ul = el("ul", "lines"); for (const line of det) add(ul, el("li", null, humanize(line))); add(box, ul); }
   const list = svcActs(s.name);
   const target = (a) => ({ service: s.name, verb: a.verb });
   // Each verb is its own target, so the groups are split by class: reading verbs, then verbs that change the service.
-  for (const [cls, label] of [["auto", "Runs at once"], ["confirm", "Changes the service; asks first"]]) {
+  for (const [cls, label] of [["auto", t("svc.auto")], ["confirm", t("svc.confirm")]]) {
     const subset = list.filter((a) => a.class === cls);
     if (!subset.length) continue;
     const gkey = "svc:" + s.name + ":" + cls;
@@ -858,15 +902,15 @@ function drawService(s) {
   const url = safeUrl(s.panel);
   if (url) {
     const r = el("div", "acts");
-    const link = el("a", null, "Open its own panel"); link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
+    const link = el("a", null, t("svc.openOwn")); link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
     const open = ui.frames.has(s.name);
-    const tog = el("button", "btn quiet", open ? "Hide it here" : "Show it here"); tog.type = "button"; tog.dataset.fk = "frame:" + s.name;
+    const tog = el("button", "btn quiet", t(open ? "svc.hideHere" : "svc.showHere")); tog.type = "button"; tog.dataset.fk = "frame:" + s.name;
     tog.setAttribute("aria-expanded", String(open));
     tog.addEventListener("click", () => { if (ui.frames.has(s.name)) ui.frames.delete(s.name); else ui.frames.add(s.name); render(); });
     add(box, add(r, link, tog));
     if (open) {
-      const f = el("iframe"); f.src = url; f.title = s.name + " panel"; f.referrerPolicy = "no-referrer";
-      add(box, f, el("p", "empty", "A blank frame means that panel refuses to be shown inside another page; use the link."));
+      const f = el("iframe"); f.src = url; f.title = t("svc.frame", { name: s.name }); f.referrerPolicy = "no-referrer";
+      add(box, f, el("p", "empty", t("svc.blank")));
     }
   }
   return box;

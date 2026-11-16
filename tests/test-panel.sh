@@ -54,6 +54,8 @@ cat > "$COORD_DATA/services/acme.conf" <<'CONF'
 status=echo ok
 verb.ping=auto:echo pong
 verb.ping.label=Ping it
+verb.ping.label.pt-BR=Pingar
+verb.restart.label.pt-BR=auto: touch ptran.txt
 verb.restart=confirm:touch restarted.txt
 verb.slow=auto:sleep 2; echo slept
 panel=http://127.0.0.1:9/
@@ -101,6 +103,172 @@ fails 1 "page uses no browser dialog" grep -qE '(alert|confirm|prompt)\(' "$H"
 fails 1 "page names no network address at all" grep -qiE 'https?://|//[a-z0-9.-]+\.[a-z]{2,}/' "$H"
 ok "page asks for no favicon from the server" grep -qF '<link rel="icon" href="data:,">' "$H"
 fails 1 "served page has every placeholder filled" grep -qF '__PANEL_' "$W/body"
+
+# The locale tables: one file per language, every key in English, nothing the page writes left outside them.
+cat > "$W/locale-check.py" <<'LOCALE_EOF'
+"""Checks the panel's locale tables against the page: locale-check.py <check> <repository root>.
+Prints one line per finding and exits 1 when there is any; `keys`, `placeholders`, `used`, `dead`, `literals`."""
+import json
+import os
+import re
+import sys
+
+check, root = sys.argv[1], sys.argv[2]
+page_path = os.environ.get("LOCALE_CHECK_PAGE") or os.path.join(root, "panel", "index.html")
+loc = os.path.join(root, "panel", "locales")
+page = open(page_path, encoding="utf-8").read()
+m = re.search(r'<script nonce="__PANEL_NONCE__">\n(.*?)\n</script>', page, re.S)
+# Comments are prose for the next reader, not words the page writes.
+script = re.sub(r"/\*.*?\*/|(^|\s)//[^\n]*", r"\1", m.group(1) if m else "", flags=re.S)
+LITERAL = r'"((?:[^"\\\n]|\\.)*)"|\'((?:[^\'\\\n]|\\.)*)\'|`((?:[^`\\]|\\.)*)`'
+literals = [next((g for g in m if g), "") for m in re.findall(LITERAL, script)]
+KEY = re.compile(r"[a-z][A-Za-z]*(\.[A-Za-z0-9_-]+)+")
+style = re.search(r"<style>(.*?)</style>", page, re.S).group(1)
+tables = {n[:-5]: json.load(open(os.path.join(loc, n), encoding="utf-8"))
+          for n in sorted(os.listdir(loc)) if n.endswith(".json")}
+en = tables["en"]
+out = []
+
+# Keys built from a prefix and a value: each prefix lists where its values come from.
+actions = [l.split("\t")[0] for l in open(os.path.join(root, "config", "panel-actions.tsv"), encoding="utf-8")
+           if l.strip() and not l.startswith("#")]
+server = open(os.path.join(root, "scripts", "panel-server.py"), encoding="utf-8").read()
+codes = set(re.findall(r'"code": "([a-z-]+)"', server)) | set(re.findall(r'self\.refuse\(\d+, "[^"]*", "([a-z-]+)"\)', server))
+health = open(os.path.join(root, "scripts", "health.sh"), encoding="utf-8").read()
+kinds = [l.split("\t")[0] for l in open(os.path.join(root, "config", "resources.tsv"), encoding="utf-8")
+         if l.strip() and not l.startswith("#")]
+stages = json.loads(re.search(r"const STAGES = (\[[^\]]*\]);", script).group(1))
+dynamic = {
+    "state.": ["running", "waiting", "done", "failed", "stopped", "unknown"],
+    "stage.": stages + ["unknown"],
+    "svcstate.": ["ok", "degraded", "down", "unknown"],
+    "action.": [a + ".label" for a in actions] + [a + ".note" for a in actions],
+    "server.": sorted(codes),
+    "reading.": re.findall(r"^report ([a-z_]+) ", health, re.M) + kinds,
+    "meter.": re.findall(r"^report [a-z_]+ .* ([A-Z]+)(?: unknown-ok)?$", health, re.M),
+}
+# A note is optional, and so is a reading's or a meter word's name: the page falls back to the data.
+optional = ("action.", "server.", "reading.", "meter.")
+plural_suffix = re.compile(r"\.(zero|one|two|few|many|other)$")
+
+
+def asked():
+    """Keys the page names (a plural by its .other form), and the prefixes it builds keys from ("state." + s)."""
+    static = {k for k in literals if KEY.fullmatch(k)}
+    static |= set(re.findall(r'data-i18n(?:-title|-aria)?="([^"]+)"', page))
+    static = {k + ".other" if k not in en and k + ".other" in en else k for k in static}
+    prefixes = set(re.findall(r'"([a-z][A-Za-z-]*\.)"\s*\+', script))
+    return static, prefixes
+
+
+if check == "keys":
+    for lang, t in tables.items():
+        for k in sorted(set(en) - set(t)):
+            out.append("%s lacks %s" % (lang, k))
+        for k in sorted(set(t) - set(en)):
+            out.append("%s has %s, which en lacks" % (lang, k))
+        for k, v in t.items():
+            if not isinstance(v, str) or not v.strip():
+                out.append("%s %s is empty or not text" % (lang, k))
+elif check == "placeholders":
+    for lang, t in tables.items():
+        for k in sorted(set(en) & set(t)):
+            a, b = set(re.findall(r"\{[a-z]+\}", en[k])), set(re.findall(r"\{[a-z]+\}", t[k]))
+            if a != b:
+                out.append("%s %s: placeholders %s, en has %s" % (lang, k, sorted(b), sorted(a)))
+elif check == "used":
+    static, prefixes = asked()
+    for k in sorted(static):
+        if k not in en and not any(k.startswith(p) for p in dynamic):
+            out.append("the page asks for %s, which en lacks" % k)
+    for p in sorted(prefixes):
+        if p not in dynamic:
+            out.append("the page builds keys from %s, which this check cannot list" % p)
+        elif not p.startswith(optional):
+            for v in dynamic[p]:
+                if p + v not in en:
+                    out.append("the page may ask for %s%s, which en lacks" % (p, v))
+    for a in actions:
+        if "action.%s.label" % a not in en:
+            out.append("action %s of config/panel-actions.tsv has no label in en" % a)
+elif check == "dead":
+    static, prefixes = asked()
+    for k in sorted(en):
+        if k in static or plural_suffix.sub("", k) + ".other" in static and plural_suffix.search(k):
+            continue
+        p = next((p for p in prefixes if k.startswith(p)), None)
+        if p and p in dynamic and k[len(p):] in dynamic[p]:
+            continue
+        out.append("en has %s, which the page never asks for" % k)
+elif check == "literals":
+    # A literal is user-facing English unless every word in it is page machinery: a class of the style sheet, a key,
+    # or a word of the DOM, the events and the data this page reads. What this cannot see: English that reaches the
+    # page from data, words inside a regular expression, and a word that is also on this list.
+    classes = set(re.findall(r"\.([a-z][a-z0-9-]*)", style))
+    machine = classes | set(re.findall(r"\b([a-z]+)\b", style))
+    machine |= set("""
+        a b i p ul li dl dt dd div span code pre summary details button article iframe h2 h3 meta name content panel
+        token refresh idle use strict string click change keydown toggle visibilitychange true false aria disabled
+        expanded label role img status group hidden busy live polite inert Escape Enter POST GET X Panel Token
+        Content Type application json cache no store api board actions run key fold fk ask go pick opt choose nopick
+        dismiss res exp frame svc attn inbox holdall hold task more cleanup global tasks services verb until confirmed
+        auto confirm unknown running waiting done failed stopped degraded down ok healthy unhealthy resource gb pct mem
+        memory free stalled failing error developer you not intake align build review demo ship watch seen detail
+        keep start end block noopener noreferrer blank referrer self href http https protocol digit numeric short
+        month day hour minute second maximumFractionDigits replace notRead LOW HIGH lock warn reap preview sweep
+        locale lang strings scripts sh url health on off all stop restart every ago s detail tick zero other note en
+        data i18n title px disk
+        """.split())
+    machine |= set(re.findall(r'\bid="([a-z-]+)"', page)) | set(re.findall(r'fold\("([a-z]+)"', script))
+    for s in literals:
+        if not s or KEY.fullmatch(s) or re.fullmatch(r"\.?[a-z][A-Za-z-]*\.?", s) and (s.strip(".") in machine or "." in s):
+            continue          # empty, a table key, or a piece of one
+        words = re.findall(r"[A-Za-z]{2,}", s)
+        # Words with a space between them are a class list or a sentence: only the style sheet's classes pass.
+        sentence = re.search(r"[A-Za-z] +[A-Za-z]", s) and not re.fullmatch(r"scripts/[a-z-]+\.sh [a-z]+", s)
+        allowed = classes | {"use", "strict", "confirm", "noopener", "noreferrer"} if sentence else machine
+        # A capital marks a word for people unless it is a key name, a header or a reading state the data carries.
+        caps = {"Escape", "Enter", "POST", "Panel", "Token", "Content", "Type", "LOW", "HIGH", "GB"}
+        foreign = [w for w in words if (w not in caps if w[0].isupper() else w not in allowed)]
+        if foreign:
+            out.append("English left in the page's script: %r" % s)
+    body = re.sub(r"<script.*?</script>|<style>.*?</style>|<[^>]+>", " ", page[page.index("<body>"):], flags=re.S)
+    for word in re.findall(r"[A-Za-z]{2,}[^<>]*", body):
+        out.append("text in the page's markup: %r" % word.strip())
+    title = re.search(r"<title[^>]*>(.*?)</title>", page, re.S).group(1)
+    if title.strip():
+        out.append("text in the page's title: %r" % title)
+else:
+    sys.exit("unknown check: %s" % check)
+for line in out:
+    print(line)
+sys.exit(1 if out else 0)
+LOCALE_EOF
+lc() { python3 "$W/locale-check.py" "$1" "$ROOT"; }
+ok "every table has exactly the keys of en, none empty" lc keys
+ok "every key has the same placeholders in every table" lc placeholders
+ok "every key the page asks for is in en, and every action has a label" lc used
+ok "every key of en is one the page asks for" lc dead
+ok "no English literal left in the page's script or markup" lc literals
+eq "the shipped tables" "en.json pt-BR.json" "$(ls "$ROOT/panel/locales" | paste -sd' ' -)"
+# The language: auto follows the browser's languages, a base language matching too; English otherwise.
+page_lang() {
+  if [ -n "${1:-}" ]; then req GET "/?key=$(tok)" -H "Accept-Language: $1" >/dev/null; else req GET "/?key=$(tok)" >/dev/null; fi
+  sed -n 's/^<html lang="\([^"]*\)">$/\1/p' "$W/body"
+}
+locale() { python3 -c 'import json,re,sys
+m = re.search(r"<script type=.application/json. id=.panel-locale.>(.*?)</script>", open(sys.argv[1]).read(), re.S)
+print(eval(sys.argv[2], {"d": json.loads(m.group(1))}))' "$W/body" "$1"; }
+eq "auto without a browser language is English" en "$(page_lang)"
+eq "the English page carries the English table" "Needs you" "$(locale 'd["strings"]["sec.needs"]')"
+eq "auto takes pt-BR" pt-BR "$(page_lang 'pt-BR,en;q=0.8')"
+eq "the Portuguese page carries the Portuguese table" "Precisa de você" "$(locale 'd["strings"]["sec.needs"]')"
+eq "auto takes the base language: pt" pt-BR "$(page_lang pt)"
+eq "auto takes the base language: pt-PT" pt-BR "$(page_lang 'pt-PT')"
+eq "auto takes the first language a table exists for" pt-BR "$(page_lang 'fr-FR, fr;q=0.9, pt;q=0.5, en;q=0.3')"
+eq "auto follows the weights, not the order" en "$(page_lang 'pt;q=0.2, en;q=0.9')"
+eq "a language refused with q=0 is never taken" en "$(page_lang 'pt;q=0, de')"
+eq "a language with no table is English" en "$(page_lang 'de-DE,de')"
 # What the page does when pressed (running guard, Escape, focus, results that survive a refresh) is checked in a
 # browser by tests/browser/panel-check.sh, run by hand.
 
@@ -142,10 +310,15 @@ eq "global buttons" "refresh inbox-seen hold-all-on reap-preview reap panel-stop
 eq "task buttons apply now" "company/ACME-1-alpha: hold-on sweep-task" "$(pick '"; ".join(t["task"]+": "+" ".join(a["id"] for a in t["actions"]) for t in j["tasks"])')"
 eq "service verbs take the binding's class" "ping:auto restart:confirm slow:auto" "$(pick '" ".join(a["verb"]+":"+a["class"] for s in j["services"] for a in s["actions"])')"
 eq "a binding's label names the verb, else the table's label" "Ping it|Run restart|Run slow" "$(pick '"|".join(a["label"] for s in j["services"] for a in s["actions"])')"
+eq "a binding's labels per language go to the page" "ping:=Ping it,pt-BR=Pingar restart:pt-BR=auto: touch ptran.txt slow:" \
+  "$(pick '" ".join(a["verb"]+":"+",".join(k+"="+v for k, v in sorted(a["verb_labels"].items())) for s in j["services"] for a in s["actions"])')"
 eq "a button says what it runs" "hold.sh on company/ACME-1-alpha" "$(pick 'j["tasks"][0]["actions"][0]["command"]')"
 
 # What may run.
 eq "unknown action refused" 404 "$(run '{"id":"rm-everything"}')"
+ok "a refusal carries a code the page translates" grep -q '"code": "no-action"' "$W/body"
+eq "a language's label line is never a verb" 404 "$(run '{"id":"service-verb","service":"acme","verb":"restart.label.pt-BR","confirmed":true}')"
+ok "and its text never ran" test ! -e "$COORD_DATA/services/ptran.txt"
 eq "missing task refused" 404 "$(run '{"id":"hold-on","task":"company/nope"}')"
 eq "task path with .. refused" 404 "$(run '{"id":"hold-on","task":"company/../company/ACME-1-alpha"}')"
 j=$(printf '{"id":"hold-on","task":"%s"}' "$A")
@@ -186,6 +359,7 @@ curl -s -o /dev/null -X POST -H "X-Panel-Token: $(tok)" -H 'Content-Type: applic
   --data-binary '{"id":"service-verb","service":"acme","verb":"slow"}' "http://127.0.0.1:$PORT/api/run" & slow=$!
 i=0; until grep -q 'sleep 2' <<< "$(ps -A -o args=)" || [ $i -ge 50 ]; do sleep 0.1; i=$((i + 1)); done
 eq "a second press while it runs is refused" 409 "$(run '{"id":"service-verb","service":"acme","verb":"slow"}')"
+ok "with the code the page translates" grep -q '"code": "already-running"' "$W/body"
 eq "another target runs meanwhile" 200 "$(run '{"id":"service-verb","service":"acme","verb":"ping"}')"
 wait "$slow"
 eq "it ran once" 1 "$(grep -c $'\tservice-verb\tacme slow\t0$' "$P/log")"
@@ -306,6 +480,52 @@ eq "a second plain request is served from the cache" "$m1" "$(mt)"
 eq "a live request answers" 200 "$(req GET '/api/board?live=1' -H "X-Panel-Token: $(tok)")"
 ok "a live request rebuilds the board" sh -c "[ '$(mt)' != '$m1' ]"
 $S/panel.sh stop >/dev/null; setconf PANEL_REFRESH_SEC 1
+
+# The private file overrides the tracked one key by key; an unknown language never starts a server.
+mkdir -p "$COORD_DATA/config"; MY=$COORD_DATA/config/panel.conf
+setconf PANEL_IDLE_MIN 1
+printf 'PANEL_LANG=pt-BR\n' > "$MY"
+start_ok "start with a private language"
+eq "the private language wins over the tracked auto" pt-BR "$(page_lang 'en-US,en')"
+$S/panel.sh stop >/dev/null
+setconf PANEL_LANG pt-BR; printf 'PANEL_LANG=en\n' > "$MY"
+start_ok "start with the private file naming English"
+eq "the private file wins over the tracked file" en "$(page_lang 'pt-BR')"
+$S/panel.sh stop >/dev/null
+setconf PANEL_LANG auto; printf 'PANEL_REFRESH_SEC=7\n' > "$MY"
+start_ok "start with a private refresh"
+req GET "/?key=$(tok)" >/dev/null
+ok "a private key is read" grep -q '<meta name="panel-refresh" content="7">' "$W/body"
+eq "and the tracked ones still apply" pt-BR "$(page_lang pt)"
+$S/panel.sh stop >/dev/null
+for bad in xx-YY '../en' 'pt BR'; do
+  printf 'PANEL_LANG=%s\n' "$bad" > "$MY"
+  fails 2 "an unknown PANEL_LANG ($bad) is refused at start" "$S/panel.sh" start
+done
+printf 'PANEL_LANG=xx-YY\n' > "$MY"
+ok "the refusal names the tables that exist" sh -c "'$S/panel.sh' start 2>&1 | grep -qF 'PANEL_LANG=xx-YY has no table; use auto or one of: en, pt-BR'"
+eq "nothing started" stopped "$($S/panel.sh status)"
+rm "$MY"
+# The server itself: a key missing from a table, or left empty, falls back to English; a text is data, never markup.
+mkdir -p "$W/loc"
+printf '{"a": "A en", "b": "B en", "c": "C en", "x": "</script><script>alert(1)</script>"}\n' > "$W/loc/en.json"
+printf '{"a": "A pt", "b": "  ", "x": "<b>&</b>"}\n' > "$W/loc/pt-BR.json"
+srv() { python3 "$S/panel-server.py" --data "$COORD_DATA" --scripts "$S" --page "$ROOT/panel/index.html" \
+  --actions "$COORD_ROOT/config/panel-actions.tsv" --locales "$W/loc" --lang "$1" --token-file "$W/tk" \
+  --port-from "$(free_port)" --idle-min 1 --refresh-sec 1; }
+echo testkey > "$W/tk"
+fails 2 "the server refuses a language with no table" srv fr
+srv pt-BR >/dev/null 2>&1 & i=0; while [ ! -s "$P/port" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+PORT=$(cat "$P/port"); req GET "/?key=testkey" >/dev/null
+eq "a key the table has is its own" "A pt" "$(locale 'd["strings"]["a"]')"
+eq "a key the table lacks is English" "C en" "$(locale 'd["strings"]["c"]')"
+eq "a key the table leaves empty is English" "B en" "$(locale 'd["strings"]["b"]')"
+fails 1 "a table's text cannot close the page's script" grep -qF '</script><script>alert' "$W/body"
+fails 1 "nor add markup" grep -qF '<b>&' "$W/body"
+eq "it reaches the page as the same text" "<b>&</b>" "$(locale 'd["strings"]["x"]')"
+rm "$W/loc/pt-BR.json"; req GET "/?key=testkey" >/dev/null
+eq "a table removed while running falls back to English" "en A en" "$(locale 'd["lang"] + " " + d["strings"]["a"]')"
+$S/panel.sh stop >/dev/null
 
 # Ports: one already listening is never taken.
 p=$(free_port); setconf PANEL_PORT_FROM "$p"; setconf PANEL_IDLE_MIN 1
