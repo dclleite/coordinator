@@ -149,9 +149,12 @@ code, .cmd { font-family: var(--mono); font-size: 0.92em; background: var(--sunk
 .where { font-size: var(--s1); color: var(--muted); margin: 0; padding-top: 10px; border-top: 1px solid var(--line); }
 
 /* Actions: auto is a plain button; confirm is drawn the same, with a trailing "…" and an "asks first" mark. Amber is kept for what needs you. */
-.acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.act { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 100%; }
+/* Zero width with a full minimum: the line wraps to its button's width instead of widening it. */
+.act .hint { width: 0; min-width: 100%; }
 .acts .lbl { font-size: var(--s1); color: var(--muted); width: 100%; }
-.hint { font-size: var(--s1); color: var(--muted); margin: -2px 0 0; }
+.hint { font-size: var(--s1); color: var(--muted); margin: 0; }
 .btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 12px; border-radius: 7px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font-size: var(--s2); font-weight: 550; cursor: pointer; max-width: 100%; text-align: left; overflow-wrap: anywhere; }
 .btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .btn:disabled { opacity: 0.5; cursor: default; }
@@ -476,10 +479,12 @@ function group(gkey, list, target, label, inResult) {
   else if (list.length) {
     const row = el("div", "acts");
     if (label) add(row, el("span", "lbl", label));
-    for (const a of list) add(row, button(a, target, gkey));
+    for (const a of list) {
+      // A button's line of explanation sits under that button, never under the whole row.
+      const b = button(a, target, gkey), hint = "action." + a.id + ".hint";
+      add(row, has(hint) ? add(el("div", "act"), b, el("p", "hint", t(hint))) : b);
+    }
     add(box, row);
-    const hint = list.map((a) => "action." + a.id + ".hint").find(has);
-    if (hint) add(box, el("p", "hint", t(hint)));
   }
   const r = ui.results[gkey];
   if (r && inResult !== false) add(box, result(r, gkey));

@@ -145,6 +145,12 @@ await step('the stop button and the block line', async () => {
   await click('[data-fk="fold:task-detail:company/ACME-6-stopper"]');
   r.stopButton = await page.evaluate((g) => { const b = document.querySelector('button[data-fk^="' + g + '|sweep-task"]'); return b ? b.textContent : ""; }, SB);
   r.blockHint = await page.evaluate((g) => { const b = document.querySelector('button[data-fk^="' + g + '|hold-on"]'); const h = b && b.closest(".grp").querySelector(".hint"); return h ? h.textContent : ""; }, SB);
+  r.blockOrder = await page.evaluate((g) => {
+    const b = document.querySelector('button[data-fk^="' + g + '|hold-on"]'); if (!b) return "";
+    const seq = [...b.closest(".acts").querySelectorAll("button, .hint")].map((e) => e === b ? "merge" : e.matches(".hint") ? "hint" : e.dataset.fk.includes("|sweep-task") ? "stop" : "other").join("|");
+    const h = b.parentElement.querySelector(".hint"), bb = b.getBoundingClientRect(), hb = h ? h.getBoundingClientRect() : null;
+    return seq + (hb && Math.abs(hb.left - bb.left) < 1 && hb.top >= bb.bottom && hb.right <= bb.right + 1 ? " under" : " elsewhere");
+  }, SB);
   await click('button[data-fk^="' + SB + '|sweep-task"]');
   r.stopItems = await page.evaluate(() => [...document.querySelectorAll('[data-fk^="ask:"] .items li')].map((e) => e.textContent).join("|"));
   await click('[data-fk^="go:' + SB + '|sweep-task"]');
@@ -205,6 +211,7 @@ eq "a result stays until dismissed" true "$(v dismissed)"
 eq "stopped: the live toggle and the content take no input" "true true" "$(v liveDisabled) $(v mainInert)"
 eq "the stop button names what it stops" "Stop what this task left running (2 browsers, 1 container)…asks first" "$(v stopButton)"
 eq "the block button carries its line" "No agent merges this task while it is held." "$(v blockHint)"
+eq "the line sits under the block button, before the stop button" "merge|hint|stop under" "$(v blockOrder)"
 eq "the question lists every item" "Browsers · br-one|Browsers · br-two|Containers · box-one" "$(v stopItems)"
 ok "Yes shows sweep.sh's line per item, the one that asks first included" python3 -c 'import sys; t=sys.argv[1]
 assert all(l in t for l in ("browsers br-one: stopped", "browsers br-two: stopped", "containers box-one: stopped")), t' "$(v stopResult)"
@@ -317,7 +324,7 @@ eq "pt-BR: a state word" "rodando" "$(v state)"
 eq "pt-BR: a button says what will happen" "Liberar merge desta tarefa…pergunta antes" "$(v holdButton)"
 eq "pt-BR: the stop button names what it stops" "Parar o que esta tarefa deixou rodando (2 navegadores, 1 container)…pergunta antes" "$(v stopButton)"
 eq "pt-BR: the block button and its line" "Bloquear merge desta tarefa|Nenhum agente faz merge desta tarefa enquanto estiver bloqueado." "$(v blockButton)|$(v blockHint)"
-eq "pt-BR: the question lists every item" "O “Sim” para estes, um por um:|Navegadores · br-three|Navegadores · br-four|Containers · box-two" "$(v stopIntro)|$(v stopItems)"
+eq "pt-BR: the question lists every item" "Ao confirmar, estes são parados, um por um:|Navegadores · br-three|Navegadores · br-four|Containers · box-two" "$(v stopIntro)|$(v stopItems)"
 eq "pt-BR: Yes shows the result" "Concluído" "$(v stopWord)"
 eq "pt-BR: everything stopped" "" "$(cat "$FK/browsers" "$FK/containers")"
 eq "pt-BR: where to act" "Para mexer nesta tarefa, escreva ao coordinator." "$(v quietLast)"

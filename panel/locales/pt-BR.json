@@ -86,7 +86,7 @@
   "ask.nothing": "Nada é enviado até você apertar o botão abaixo.",
   "ask.yes": "Sim, {action}",
   "ask.cancel": "Cancelar",
-  "ask.stops": "O “Sim” para estes, um por um:",
+  "ask.stops": "Ao confirmar, estes são parados, um por um:",
   "choose.restart": "Reiniciar…",
   "choose.tip": "Pergunta qual parte, depois pergunta antes de rodar",
   "choose.q": "Reiniciar qual parte?",
