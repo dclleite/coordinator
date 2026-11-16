@@ -100,7 +100,9 @@ while IFS= read -r d; do
         [ -n "$recent" ] || problem stale-agent "$name: $F1 $F8 is running with no ledger or handoff activity for $stale minutes"
       fi
       if [ "$F6" != "-" ] && [ -n "$F6" ]; then folder=$(basename "$F6"); else folder=$(basename "$F5"); fi
-      text="$F1 · $F2 $F3 $F4 · $folder · $F11${lv:+ (live: $lv)}"
+      # A row written before the state column reads unknown; board.json keeps that value for the panel.
+      st=$F11; [ "$st" != unknown ] || st="state not recorded"
+      text="$F1 · $F2 $F3 $F4 · $folder · $st${lv:+ (live: $lv)}"
       tree=$tree$(printf '%s\t%s\t%s\t%s' "$F8" "$F10" "$text" "$F11")$'\n'
       a=$(printf '{"role": %s, "provider": %s, "model": %s, "effort": %s, "repo": %s, "worktree": %s, "branch": %s, "thread": %s, "parent": %s, "state": %s, "live": %s}' \
         "$(j "$F1")" "$(j "$F2")" "$(j "$F3")" "$(j "$F4")" "$(j "$F5")" "$(j "$F6")" "$(j "$F7")" "$(j "$F8")" "$(j "$F10")" "$(j "$F11")" "$(j "$lv")")
@@ -187,10 +189,20 @@ problems_json=$(paste -sd, "$parts/problems.json" 2>/dev/null)
   else echo "None registered."; fi
   echo; echo "## Machine"; echo
   if [ -n "$health" ]; then
+    # All readings ok: one line with the two that matter. Otherwise only the readings that are not ok.
     printf '%s' "$health" | json_pairs | awk -F'\t' '
-      function flush() { if (n != "") print "- " n ": " v (l == "" ? "" : " (limit " l ")") " " s }
-      $1 == "verdict" { print "Verdict: " $2 } $1 == "name" { flush(); n = $2; v = ""; l = ""; s = "" }
-      $1 == "value" { v = $2 } $1 == "limit" { l = $2 } $1 == "state" { s = $2 } END { flush() }'
+      function flush() { if (n == "") return; r++
+        if (s == "ok") { ok++; if (n == "disk_free_gb") disk = v; if (n == "mem_free_pct") mem = v }
+        else bad = bad "- " n ": " v (l == "" ? "" : " (limit " l ")") " " s "\n"
+        n = "" }
+      $1 == "verdict" { verdict = $2 } $1 == "name" { flush(); n = $2; v = ""; l = ""; s = "" }
+      $1 == "value" { v = $2 } $1 == "limit" { l = $2 } $1 == "state" { s = $2 }
+      END { flush()
+        if (r > 0 && ok == r) {
+          x = (disk == "" ? "" : "disk free " disk " GB") (disk != "" && mem != "" ? ", " : "") (mem == "" ? "" : "memory free " mem "%")
+          print "Verdict: " verdict ", all " r " readings ok" (x == "" ? "" : " (" x ")"); exit }
+        print "Verdict: " verdict; printf "%s", bad
+        if (ok > 0) print "- " ok " other reading" (ok == 1 ? "" : "s") " ok" }'
   else echo "Verdict: unknown (no health reading)"; fi
   # The counts are health.sh readings already; what only sweep.sh tells is how many no open task owns.
   if [ -n "$resources" ]; then

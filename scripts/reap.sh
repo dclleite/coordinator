@@ -81,7 +81,7 @@ if [ -x "$SCRIPTS/panel.sh" ]; then
 fi
 if [ $dry -eq 1 ]; then tmp=$("$SCRIPTS/browser.sh" tmp-clean "$REAP_TMP_MAX_DAYS" --dry-run)
 else tmp=$("$SCRIPTS/browser.sh" tmp-clean "$REAP_TMP_MAX_DAYS"); fi
-echo "$tmp"
+case "$tmp" in tmp_old=0|tmp_old=0\ *) ;; *) echo "$tmp" ;; esac
 summary="stopped=$stopped failed=$failed ${tmp%% *}"
 echo "$summary"
 [ $dry -eq 1 ] || { mkdir -p "$DATA"; printf '%s\t%s\n' "$(now)" "$summary" >> "$DATA/reap.log"; }

@@ -30,7 +30,7 @@ $S/hold.sh on --all
 $S/board.sh
 ok "board with a quoted title is JSON" valid_json "$J"
 ok "title escaped" grep -qF '"title": "Say \"hi\" \\ to\ttabs"' "$J"
-ok "old row on the board" grep -q '^- worker · codex m low · app · unknown$' "$M"
+ok "old row on the board" grep -q '^- worker · codex m low · app · state not recorded$' "$M"
 ok "old row in JSON with defaults" grep -qF '"thread": "thr_old", "parent": "-", "state": "unknown"' "$J"
 ok "tree: sub-coordinator at the root" grep -q '^- sub-coordinator · codex m medium · coord · running$' "$M"
 ok "tree: its worker one level down, by worktree name" grep -q '^  - worker · codex m low · w1 · running$' "$M"
@@ -73,7 +73,7 @@ ok "still JSON" valid_json "$J"
 cat > "$T/tools/health.sh" <<'F'
 #!/bin/bash
 [ "${1:-}" = --json ] || exit 2
-echo '{"verdict": "unhealthy", "readings": [{"name": "disk_free_gb", "value": "9", "limit": "15", "state": "LOW"}]}'
+echo '{"verdict": "unhealthy", "readings": [{"name": "disk_free_gb", "value": "9", "limit": "15", "state": "LOW"}, {"name": "mem_free_pct", "value": "40", "limit": "20", "state": "ok"}, {"name": "containers", "value": "0", "limit": "12", "state": "ok"}]}'
 exit 1
 F
 cat > "$T/tools/service.sh" <<'F'
@@ -96,9 +96,27 @@ ok "service on the board" grep -qF -- '- bot: ok · http://127.0.0.1:9999 · ver
 ok "service detail" grep -q '^  - watcher up$' "$M"
 ok "machine verdict" grep -q '^Verdict: unhealthy$' "$M"
 ok "machine reading" grep -q '^- disk_free_gb: 9 (limit 15) LOW$' "$M"
+ok "readings that are ok are counted" grep -q '^- 2 other readings ok$' "$M"
+fails 1 "readings that are ok are not listed" grep -q '^- mem_free_pct' "$M"
 ok "orphans on the board" grep -q '^- browser: 2 not owned by an open task (sweep.sh --orphans lists them)$' "$M"
 fails 1 "no line for a kind without orphans" grep -q '^- worktrees' "$M"
 fails 1 "counts not repeated after the health readings" grep -q ' of 3 ok$' "$M"
+
+# Every reading ok: one line, with free disk and free memory.
+mkdir -p "$T/well"; cp "$T/tools/service.sh" "$T/tools/sweep.sh" "$T/well/"
+cat > "$T/well/health.sh" <<'F'
+#!/bin/bash
+echo '{"verdict": "healthy", "readings": [{"name": "disk_free_gb", "value": "61", "limit": "15", "state": "ok"}, {"name": "mem_free_pct", "value": "44", "limit": "20", "state": "ok"}, {"name": "containers", "value": "0", "limit": "12", "state": "ok"}]}'
+F
+chmod +x "$T/well/health.sh"
+COORD_TOOLS=$T/well $S/board.sh
+eq "healthy machine in one line" "Verdict: healthy, all 3 readings ok (disk free 61 GB, memory free 44%)|- browser: 2 not owned by an open task (sweep.sh --orphans lists them)" \
+  "$(sed -n '/^## Machine/,/^## /p' "$M" | grep -v '^#' | grep . | paste -sd'|' -)"
+# A healthy verdict with a reading that is not ok (an engine that does not answer) lists that reading.
+sed -i.bak 's/"value": "0", "limit": "12", "state": "ok"/"value": "unknown", "limit": "12", "state": "unknown"/' "$T/well/health.sh"
+COORD_TOOLS=$T/well $S/board.sh
+eq "healthy with an unknown reading" "Verdict: healthy|- containers: unknown (limit 12) unknown|- 2 other readings ok" \
+  "$(sed -n '/^## Machine/,/^## /p' "$M" | grep -v '^#' | grep . | grep -v 'not owned' | paste -sd'|' -)"
 
 # An input that answers something else counts as missing.
 printf '#!/bin/bash\necho "not json"\n' > "$T/tools/service.sh"

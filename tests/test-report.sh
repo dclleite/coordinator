@@ -51,7 +51,8 @@ fails 2 "bad option" $S/report.sh --all
 # status.sh: what finished, then the board.
 printf 'Status check.\n' | $S/handoff-write.sh "$D" worker coordinator >/dev/null
 out=$($S/status.sh)
-eq "status starts with the report" "ABC-123 · worker: Status check." "$(printf '%s\n' "$out" | head -1)"
+eq "status puts the report under a heading" "$(printf '## Finished, not yet seen\n\nABC-123 · worker: Status check.\n')" "$(printf '%s\n' "$out" | head -3)"
+eq "status with nothing new starts with the board" "# Board" "$($S/status.sh | head -1 | cut -c1-7)"
 ok "status prints the board" sh -c "printf '%s\n' \"\$1\" | grep -q '^# Board '" _ "$out"
 eq "status marked it seen" "nothing new" "$($S/report.sh)"
 printf '#!/bin/bash\necho "{\\"thread\\":{\\"status\\":\\"running\\"}}"\n' > "$T/t3"; chmod +x "$T/t3"

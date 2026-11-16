@@ -31,6 +31,8 @@ ok "new tmp kept" test -f "$BH/tmp/new.jpg"
 ok "confirm row untouched" test ! -f "$FIX/stops.log"
 ok "logged" grep -q $'\tstopped=2 failed=0 tmp_old=1$' "$COORD_DATA/reap.log"
 ok "never a global stop" test -z "$(grep '^tool' "$LOG")"
+eq "nothing to act on: only the summary" "stopped=0 failed=0 tmp_old=0" "$($RP --dry-run)"
+eq "nothing deleted: only the summary" "stopped=0 failed=0 tmp_old=0" "$($RP)"
 
 # Under the limit, only age stops an unowned browser; an owned one is never stopped.
 { proc 07:00:00 e; proc 1-00:00:00 d; } >> "$PS"; : > "$LOG"

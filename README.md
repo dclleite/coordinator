@@ -49,7 +49,7 @@ Then open the folder in your agent and say "set up the coordinator": the `coordi
 
 Open the folder in an agent and describe a task, or paste a ticket.
 The coordinator creates the record under `.private/tasks/<scope>/<task>/`, starts a sub-coordinator, and tells you who was started where.
-"What is running?" runs `scripts/status.sh`, which prints the board: what needs you, what runs (as a tree per task), what finished, the services, the machine.
+"What is running?" runs `scripts/status.sh`, which prints the board: what needs you, what runs (as a tree per task), what finished, the services, the machine (one line when every reading is ok).
 The same board is written to `.private/board.md` and `.private/board.json` for any page or tool that wants to show it.
 
 ## The panel
@@ -111,7 +111,7 @@ A loaded model holds memory for as long as it stays loaded, so give it an unload
 A container engine that does not answer reads `containers=unknown` within `CONTAINER_TIMEOUT_SEC` and is shown without stopping launches.
 Whoever starts something (a worktree, a browser, a server, a container) records it with `scripts/resource-add.sh`, and `scripts/sweep.sh` stops what a task recorded when the task ends.
 `scripts/sweep.sh --orphans` lists what runs or sits on disk that no open task claims, without stopping it.
-`scripts/reap.sh` is the periodic job for browsers nobody owns and old temporary files; `--dry-run` shows what it would do, and `scripts/reap.sh install` adds it to the system scheduler only when you run it (on Linux it prints the cron line).
+`scripts/reap.sh` is the periodic job for browsers nobody owns and old temporary files; `--dry-run` shows what it would do (a line per thing it would stop or delete, then the summary line `stopped=… failed=… tmp_old=…`), and `scripts/reap.sh install` adds it to the system scheduler only when you run it (on Linux it prints the cron line).
 Kept for good: task records and handoffs, the only durable context.
 
 ## Registering a service
