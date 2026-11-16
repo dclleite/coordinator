@@ -46,7 +46,7 @@ case "$1" in
 esac
 # COORD_T3 names the runtime command (tests point it at a fake, or at nothing).
 if [ -n "${COORD_T3+x}" ]; then t3=$COORD_T3
-else t3=$(command -v t3 2>/dev/null || echo "${HOME:-}/.t3/bin/t3"); fi
+else t3=$(tool_path t3) || t3=""; fi
 [ -n "$t3" ] && [ -x "$t3" ] || { echo unknown; exit 0; }
 secs=${LIVE_TIMEOUT_SEC:-5}
 if command -v timeout >/dev/null 2>&1; then run=(timeout "$secs")

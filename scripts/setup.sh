@@ -22,7 +22,10 @@ done
 if command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1; then :; else
   say "missing (required): shasum or sha256sum"; failed=1; fi
 opt=""
-for t in docker t3 dev-browser; do command -v "$t" >/dev/null 2>&1 || opt="$opt $t"; done
+for t in docker t3 dev-browser; do
+  command -v "$t" >/dev/null 2>&1 && continue
+  if c=$(tool_path "$t"); then say "$(path_hint "$c")"; else opt="$opt $t"; fi
+done
 [ -z "$opt" ] || say "not installed (optional):$opt"
 
 # 2. The private folder must never be tracked.
@@ -141,7 +144,13 @@ if [ -f "$prov" ]; then
 else
   decide "which providers you use and the account each is signed in with: write $prov"
 fi
-decide "the private terms setup cannot discover (company, people, repositories, ticket prefixes): add them to $terms"
+# A person's term is one setup cannot discover on this run; until the list holds one, ask for them.
+own=0
+if [ -f "$terms" ]; then
+  own=$(awk -v cand="$W/cand" 'BEGIN { while ((getline k < cand) > 0) found[tolower(k)] = 1 }
+    !/^#/ && $0 != "" && !(tolower($0) in found) { n++ } END { print n + 0 }' "$terms")
+fi
+[ "$own" -gt 0 ] || decide "the private terms setup cannot discover (company, people, repositories, ticket prefixes): add them to $terms"
 
 cat "$W/decide"
 [ "$failed" -eq 0 ] || exit 1

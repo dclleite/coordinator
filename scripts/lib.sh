@@ -19,6 +19,23 @@ now() {
 # Prints the value of one frontmatter field of a task.md.
 field() { awk -v k="$2" 'NR>1 && /^---$/ {exit} index($0, k": ")==1 {print substr($0, length(k)+3)} $0==k":" {print ""}' "$1"; }
 
+# tool_path <name>: the command's path, from PATH or else from a place installers use outside it.
+tool_path() {
+  local c d
+  c=$(command -v "$1" 2>/dev/null) && [ -x "$c" ] && { echo "$c"; return 0; }
+  for d in "${HOME:-/nonexistent}/.t3/bin" "${HOME:-/nonexistent}/.local/bin" "${HOME:-/nonexistent}/.docker/bin"; do
+    [ -f "$d/$1" ] && [ -x "$d/$1" ] && { echo "$d/$1"; return 0; }
+  done
+  return 1
+}
+
+# path_hint <path>: one line saying a command was found outside PATH, with the line that puts it on PATH.
+path_hint() {
+  local d=${1%/*}
+  case "$d" in "${HOME:-/nonexistent}"/*) d='$HOME'${d#"$HOME"} ;; esac
+  printf '%s: found at %s, not on PATH; add to your shell profile: export PATH="%s:$PATH"\n' "${1##*/}" "$1" "$d"
+}
+
 task_dir() { [ -f "$1/task.md" ] || die 2 "not a task folder: $1"; }
 
 # Physical path of an existing folder; empty when it does not exist.

@@ -23,6 +23,12 @@ mkdir -p "$H/.t3/tools/codex/0.1.0/bin"; fake "$H/.t3/tools/codex/0.1.0/bin/code
 row=$(run detect 2>/dev/null | grep '^codex')
 eq "codex found off PATH" "codex	unknown	codex	reasoningEffort	$H/.t3/tools/codex/0.1.0/bin/codex" "$(printf '%s' "$row" | cut -f1-5)"
 rm -r "$H/.t3"
+# An agent in a known install place that is not on PATH: found, with the line that puts it there.
+mkdir -p "$H/.local/bin"; fake "$H/.local/bin/qwen" qwen "--model --reasoning-effort"
+O2=$(run detect 2>&1)
+ok "found in a known place off PATH" grep -q "^qwen	unknown	-	-	$H/.local/bin/qwen	" <<< "$O2"
+ok "says it is not on PATH, with the profile line" grep -qF "note: qwen: found at $H/.local/bin/qwen, not on PATH; add to your shell profile: export PATH=\"\$HOME/.local/bin:\$PATH\"" <<< "$O2"
+rm -r "$H/.local"
 mkdir -p "$A/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS"
 fake "$A/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex" codex "--cd --model --config"
 ok "codex found inside the desktop app" sh -c "HOME='$H' PATH='$B:$SYS' COORD_APPS_DIR='$A' COORD_NO_NET_PROBE=1 '$P' detect 2>/dev/null | grep -q '^codex	unknown	-	-	$A/'"

@@ -66,3 +66,20 @@ eq "the example rows are seeded" "$(awk -F'\t' '!/^#/ && NF {print $1}' "$FIX/co
 ok "the decide line names claude and codex" grep -q '^decide: the account kind .*claude, codex' <<< "$out"
 printf 'odd\tsomething\t-\t-\t-\t-\n' >> "$COORD_DATA/config/providers.tsv"
 ok "a kind that is not valid is asked about" grep -q '^decide: the account kind .*odd' <<< "$(PATH=/usr/bin:/bin $S 2>&1)"
+
+# A tool installed in a known place outside PATH is found and named, with the line that puts it on PATH.
+mkdir -p "$HOME/.t3/bin"; printf '#!/bin/sh\nexit 0\n' > "$HOME/.t3/bin/t3"; chmod +x "$HOME/.t3/bin/t3"
+out=$(PATH=/usr/bin:/bin $S --check 2>&1)
+ok "t3 off PATH is found" grep -qF "t3: found at $HOME/.t3/bin/t3, not on PATH; add to your shell profile: export PATH=\"\$HOME/.t3/bin:\$PATH\"" <<< "$out"
+fails 1 "t3 off PATH is not called missing" grep -q '^not installed (optional):.* t3' <<< "$out"
+printf '#!/bin/sh\necho "{\\"thread\\":{\\"status\\":\\"idle\\"}}"\n' > "$HOME/.t3/bin/t3"
+eq "live.sh asks t3 off PATH" idle "$(PATH=/usr/bin:/bin env -u COORD_T3 "$ROOT/scripts/live.sh" thr_x)"
+rm -rf "$HOME/.t3"
+
+# The private terms are asked for only while the list holds none the person added.
+asks() { grep -q '^decide: the private terms' <<< "$(PATH=/usr/bin:/bin $S --check 2>&1)"; }
+grep -v '^acmeprivate$' "$COORD_DATA/sensitive-terms.txt" > "$HOME/terms" && cat "$HOME/terms" > "$COORD_DATA/sensitive-terms.txt"
+ok "only discovered terms: asked" asks
+printf 'acmeprivate\n' >> "$COORD_DATA/sensitive-terms.txt"
+fails 1 "a term of the person's own: not asked" asks
+

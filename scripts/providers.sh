@@ -68,8 +68,9 @@ find_bin() { # <name> <binary names...>
   for b in "$@"; do
     c=$(command -v "$b" 2>/dev/null) && [ -x "$c" ] && { echo "$c"; return; }
   done
+  for b in "$@"; do c=$(tool_path "$b") && { echo "$c"; return; }; done
   for b in "$@"; do
-    for c in "$HOME/.local/bin/$b" "$HOME/.npm-global/bin/$b" "$HOME"/.nvm/versions/node/*/bin/"$b"; do
+    for c in "$HOME/.npm-global/bin/$b" "$HOME"/.nvm/versions/node/*/bin/"$b"; do
       [ -f "$c" ] && [ -x "$c" ] && { echo "$c"; return; }
     done
   done
@@ -106,6 +107,7 @@ detect() {
     case "$bin" in *"'"*|*'	'*) note "$name: skipped, its path has a quote or a tab"; continue ;; esac
     v=$(run_capped 5 "$bin" --version | head -1 | cut -c1-80)
     note "$name: $bin ${v:-version unknown}"
+    command -v "${bin##*/}" >/dev/null 2>&1 || [ "$(tool_path "${bin##*/}")" != "$bin" ] || note "$(path_hint "$bin")"
     q="'$bin'"
     t=$(template "$name" "$q")
     launch=${t%%|*}; t=${t#*|}; flags=${t%%|*}; sub=${t#*|}
