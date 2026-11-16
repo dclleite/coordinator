@@ -1,0 +1,6 @@
+claude	default	claude-opus-5-5	medium
+claude	escalated	claude-opus-5-5	high
+claude	planning	claude-fable-5-2	medium
+codex	default	gpt-6.1-sol	medium
+codex	escalated	gpt-6.1-sol	high
+codex	planning	gpt-6-astra	low

@@ -1,0 +1,10 @@
+# kind	count_cmd	limit	list_cmd	stop_cmd	class
+# Commands run with bash from the repository root; $ROOT, $DATA and $SCRIPTS are exported; {id} is one listed id.
+browsers	"$SCRIPTS"/browser.sh count	6	"$SCRIPTS"/browser.sh list	"$SCRIPTS"/browser.sh stop-name {id}	auto
+browser-profiles	"$SCRIPTS"/browser.sh profiles | wc -l	40	"$SCRIPTS"/browser.sh profiles	"$SCRIPTS"/browser.sh profile-rm {id}	confirm
+browser-tmp-files	"$SCRIPTS"/browser.sh tmp-count	5000	-	-	auto
+containers	command -v docker >/dev/null || { echo 0; exit 0; }; docker ps -q | wc -l	12	command -v docker >/dev/null || exit 0; docker ps -q	docker stop {id}	confirm
+worktrees	"$SCRIPTS"/sweep.sh --worktrees | wc -l	20	"$SCRIPTS"/sweep.sh --worktrees	-	confirm
+local-models	command -v ollama >/dev/null || { echo 0; exit 0; }; o=$(ollama ps 2>/dev/null) || { echo 0; exit 0; }; printf "%s\n" "$o" | awk "NR>1 && NF" | wc -l	1	command -v ollama >/dev/null || exit 0; o=$(ollama ps 2>/dev/null) || exit 0; printf "%s\n" "$o" | awk "NR>1 && NF {print \$1}"	ollama stop {id}	auto
+agent-runs	"$SCRIPTS"/sweep.sh --run agent-runs list | wc -l	8	for f in "$DATA"/tasks/*/*/resources.tsv; do [ -f "$f" ] && grep -qx "status: open" "${f%/*}/task.md" 2>/dev/null && awk -F"\t" "\$1==\"agent-runs\" && \$5==\"-\" {print \$2}" "$f"; done | sort -u | while read -r p; do [ "$("$SCRIPTS"/live.sh "pid:$p" 2>/dev/null)" = running ] && echo "$p"; done; true	"$SCRIPTS"/live.sh --stop pid:{id}	auto
+panel	"$SCRIPTS"/panel.sh status | awk '$1=="running" {n++} END {print n+0}'	1	"$SCRIPTS"/panel.sh status | awk '$1=="running" {print "panel"}'	"$SCRIPTS"/panel.sh stop	auto

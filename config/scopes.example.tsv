@@ -1,0 +1,4 @@
+# scope	accepts (comma-separated account kinds: company, personal, local)
+# A scope with no row accepts only the stated kind of the provider routed to it in routing.tsv.
+company	company
+personal	personal,company,local

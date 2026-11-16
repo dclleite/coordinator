@@ -1,0 +1,3 @@
+# Exact strings public-check.sh lets through in every clone, CI included.
+# Only fixtures that are fake by construction belong here; anything real goes to .private/public-allow.txt.
+# A secret-scan hit passes when its line contains one of these strings (at least 8 characters).

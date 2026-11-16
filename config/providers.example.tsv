@@ -1,0 +1,6 @@
+# provider	account	instance	effort_option	bin	launch
+# account is company, personal or local, and only a person sets it: a missing or unknown one counts as personal.
+# scripts/providers.sh detect --write adds what is installed here with account unknown.
+# The kinds below only illustrate: setup.sh copies these rows with account unknown and asks for each.
+claude	company	claudeAgent	effort	-	cd {dir} && claude -p --model {model} --effort {effort} < {brief}
+codex	personal	codex	reasoningEffort	-	codex exec -C {dir} -m {model} -c model_reasoning_effort={effort} - < {brief}

@@ -1,0 +1,19 @@
+#!/bin/bash
+# Refuses a push only when its outgoing commits fail the public check (messages, authors, every file version).
+set -u
+check="$(cd "$(dirname "$0")/.." && pwd -P)/scripts/public-check.sh"
+remote=${1:-origin}
+nonzero() { case $1 in *[!0]*) return 0 ;; esac; return 1; }
+status=0
+while read -r lref lsha rref rsha; do
+  nonzero "$lsha" || continue
+  # An annotated tag carries its own message and tagger, which no commit check reads.
+  if [ "$(git cat-file -t "$lsha" 2>/dev/null)" = tag ]; then bash "$check" --tag "$lsha" || status=1; fi
+  if nonzero "$rsha" && git cat-file -e "$rsha^{commit}" 2>/dev/null; then
+    bash "$check" --commits "$rsha..$lsha" || status=1
+  else
+    bash "$check" --commits "$lsha" --not --remotes="$remote" || status=1
+  fi
+done
+[ "$status" -eq 0 ] || echo "push refused: fix the commits above, or list a deliberate string in .private/public-allow.txt" >&2
+exit "$status"

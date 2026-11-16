@@ -1,0 +1,21 @@
+name: test
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tests
+        run: bash tests/run.sh
+      - name: Public check, generic part (tree)
+        run: bash scripts/public-check.sh --generic
+      - name: Public check, generic part (every commit)
+        run: bash scripts/public-check.sh --generic --commits HEAD

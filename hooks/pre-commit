@@ -1,0 +1,3 @@
+#!/bin/bash
+# Refuses the commit while what it would take (the index, not the working files) fails the public check.
+exec bash "$(cd "$(dirname "$0")/.." && pwd -P)/scripts/public-check.sh" --staged
