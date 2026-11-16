@@ -344,9 +344,12 @@ function shortTime(v) { const d = new Date(v); return isNaN(d) ? String(v || "")
 function nice(name) { return String(name).replace(/^resource\./, "").replace(/_(gb|pct)$/, "").replace(/^mem_/, "memory_").replace(/[_-]+/g, " ").replace(/^./, (c) => c.toUpperCase()); }
 function readingName(name) { const k = "reading." + String(name).replace(/^resource\./, ""); return has(k) ? t(k) : nice(name); }
 function safeUrl(u) { try { const x = new URL(u); return (x.protocol === "http:" || x.protocol === "https:") ? x.href : null; } catch (e) { return null; } }
-// A service or a reading counts in seconds; people read "11 h ago, expected every 30 min".
+// A service or a reading counts in seconds; people read "11 h ago, expected every 30 min". A loop's own line
+// ("last tick 47950s ago, every 1800s: stalled") is the one shape put wholly into words; the rest stays the service's.
 function humanize(text) {
-  return String(text).replace(/\bevery (\d+) ?s\b/g, (_, n) => t("svc.every", { d: dur(+n) }))
+  return String(text).replace(/\blast tick (\d+) ?s ago, every (\d+) ?s(?:: (stalled|failing|error)\b)?/gi, (_, a, e, w) =>
+      t("svc.lastTick", { ago: t("time.ago", { d: dur(+a) }), every: dur(+e) }) + (w ? ": " + t("loopstate." + w.toLowerCase()) : ""))
+    .replace(/\bevery (\d+) ?s\b/g, (_, n) => t("svc.every", { d: dur(+n) }))
     .replace(/\b(\d+) ?s ago\b/g, (_, n) => t("time.ago", { d: dur(+n) })).replace(/\b(\d+)s\b/g, (_, n) => dur(+n));
 }
 // A degraded service whose status names a stalled or failing loop needs the developer; the words are the data's own.

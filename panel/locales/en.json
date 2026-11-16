@@ -39,6 +39,10 @@
   "dur.days.one": "{n} day",
   "dur.days.other": "{n} days",
   "svc.every": "expected every {d}",
+  "svc.lastTick": "last tick {ago}, expected every {every}",
+  "loopstate.stalled": "stalled",
+  "loopstate.failing": "failing",
+  "loopstate.error": "error",
 
   "fresh.updating": "Updating…",
   "fresh.updated": "Updated {time}",

@@ -142,6 +142,7 @@ dynamic = {
     "state.": ["running", "waiting", "done", "failed", "stopped", "unknown"],
     "stage.": stages + ["unknown"],
     "svcstate.": ["ok", "degraded", "down", "unknown"],
+    "loopstate.": re.search(r"every \(\\d\+\) \?s\(\?:: \(([a-z|]+)\)", script).group(1).split("|"),
     "action.": [a + ".label" for a in actions] + [a + ".note" for a in actions],
     "server.": sorted(codes),
     "reading.": re.findall(r"^report ([a-z_]+) ", health, re.M) + kinds,
@@ -251,6 +252,49 @@ ok "every key the page asks for is in en, and every action has a label" lc used
 ok "every key of en is one the page asks for" lc dead
 ok "no English literal left in the page's script or markup" lc literals
 eq "the shipped tables" "en.json pt-BR.json" "$(ls "$ROOT/panel/locales" | paste -sd' ' -)"
+# A service's loop line, run through the page's own word functions: the recognized fragment and the state word that
+# ends it come from the table; the rest of the line stays the service's.
+cat > "$W/words.py" <<'WORDS_EOF'
+import json, re, sys
+panel, lang, line, extra = sys.argv[1:5]
+page = open(panel + "/index.html", encoding="utf-8").read()
+strings = json.load(open(panel + "/locales/en.json", encoding="utf-8"))
+if lang != "en":
+    strings.update(json.load(open("%s/locales/%s.json" % (panel, lang), encoding="utf-8")))
+strings.update(json.loads(extra))
+def function(name):
+    start = page.index("\nfunction %s(" % name) + 1
+    depth, k = 0, page.index("{", start)
+    while True:
+        depth += {"{": 1, "}": -1}.get(page[k], 0); k += 1
+        if depth == 0:
+            return page[start:k]
+js = ["const LANG = %s, STR = %s;" % (json.dumps(lang), json.dumps(strings)),
+      re.search(r"const PLURAL = .*;", page).group(0)]
+js += [function(n) for n in ("num", "has", "fill", "t", "tn", "dur", "humanize")]
+js.append("console.log(humanize(%s));" % json.dumps(line))
+print("\n".join(js))
+WORDS_EOF
+words() { local extra=${3:-}; [ -n "$extra" ] || extra='{}'
+  python3 "$W/words.py" "$ROOT/panel" "$1" "$2" "$extra" > "$W/words.js" && node "$W/words.js"; }
+if command -v node >/dev/null 2>&1; then
+  eq "en: the loop line reads as before" "nudge: last tick 13 h ago, expected every 30 min: stalled" \
+    "$(words en 'nudge: last tick 47950s ago, every 1800s: stalled')"
+  eq "pt-BR: the loop fragment and its state word are in Portuguese" "nudge: último tick há 13 h, esperado a cada 30 min: parado" \
+    "$(words pt-BR 'nudge: last tick 47950s ago, every 1800s: stalled')"
+  eq "pt-BR: failing and error too" "a: último tick há 5 s, esperado a cada 1 min: falhando | b: último tick há 2 min, esperado a cada 1 min: erro" \
+    "$(words pt-BR 'a: last tick 5s ago, every 60s: failing | b: last tick 120s ago, every 60s: error')"
+  eq "pt-BR: a loop line with no state word" "mention: último tick há 2 s, esperado a cada 1 min" "$(words pt-BR 'mention: last tick 2s ago, every 60s')"
+  eq "en: a loop line with no state word" "mention: last tick 2 s ago, expected every 1 min" "$(words en 'mention: last tick 2s ago, every 60s')"
+  eq "the fragment and the state word are the table's" "<F 13 h ago 30 min>: <S>" \
+    "$(words pt-BR 'nudge: last tick 47950s ago, every 1800s: stalled' '{"svc.lastTick":"<F {ago} {every}>","time.ago":"{d} ago","loopstate.stalled":"<S>"}' | sed 's/^nudge: //')"
+  eq "pt-BR: a word the page does not recognize stays the service's" "nudge: último tick há 13 h, esperado a cada 30 min: paused" \
+    "$(words pt-BR 'nudge: last tick 47950s ago, every 1800s: paused')"
+  eq "pt-BR: other service lines keep their words, durations follow the language" "panel: signal fresh, 19 s; watcher: running, 52 MB" \
+    "$(words pt-BR 'panel: signal fresh, 19s; watcher: running, 52 MB')"
+else
+  echo "loop line checks skipped: node is missing"
+fi
 # The language: auto follows the browser's languages, a base language matching too; English otherwise.
 page_lang() {
   if [ -n "${1:-}" ]; then req GET "/?key=$(tok)" -H "Accept-Language: $1" >/dev/null; else req GET "/?key=$(tok)" >/dev/null; fi

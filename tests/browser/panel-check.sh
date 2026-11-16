@@ -198,6 +198,7 @@ await step("headings and words", async () => {
 });
 await step("a question", async () => {
   await page.click('[data-fk="fold:services"]', { timeout: 10000 });
+  r.svcLine = await page.evaluate(() => [...document.querySelectorAll("ul.lines li")].map((e) => e.textContent).find((x) => /^loop:/.test(x)) || "");
   await page.click('[data-fk="choose:svc:toy:confirm"]', { timeout: 10000 });
   await page.click('[data-fk="opt:svc:toy:confirm|service-verb||toy|restart-a"]', { timeout: 10000 });
   r.question = await text('[data-fk^="ask:"] .q');
@@ -244,7 +245,8 @@ eq "pt-BR: the page says its language" "pt-BR Painel do coordinator" "$(v lang) 
 eq "pt-BR: the main headings" "Precisa de você|Tarefas abertas|Todo o resto" "$(v headings)"
 eq "pt-BR: a state word" "rodando" "$(v state)"
 eq "pt-BR: a button says what will happen" "Liberar os merges desta tarefa…pergunta antes" "$(v holdButton)"
-eq "pt-BR: durations follow the language, the service's words stay" "toy: loop: last tick há 11 h, esperado a cada 30 min: stalled" "$(v loop)"
+eq "pt-BR: the loop line and its state word in Portuguese, in Needs you" "toy: loop: último tick há 11 h, esperado a cada 30 min: parado" "$(v loop)"
+eq "pt-BR: the same line under Services" "loop: último tick há 11 h, esperado a cada 30 min: parado" "$(v svcLine)"
 eq "pt-BR: the question names the action by the binding's Portuguese label and the target" "Reiniciar a parte A (toy)?" "$(v question)"
 eq "pt-BR: the answer button" "Sim, reiniciar a parte A" "$(v yes)"
 eq "pt-BR: an action with no Portuguese label of its own" "Rodar ping" "$(v pingButton)"

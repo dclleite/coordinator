@@ -68,7 +68,9 @@ It needs Python 3; without it, `scripts/status.sh` still prints the board.
 The page speaks the language of a table in `panel/locales/`: `en.json` is the default and fills any key another table lacks, and `pt-BR.json` ships with it; a new language is one more file with the same keys.
 `PANEL_LANG` in `config/panel.conf` chooses it: `auto` (the default) takes the first of the browser's languages a table exists for, its base language matching too (`pt` and `pt-PT` get `pt-BR`), else English; a language name forces that table.
 Your own choice goes in `.private/config/panel.conf`, which overrides the tracked file key by key, for example `PANEL_LANG=pt-BR` (or `PANEL_LANG=en` to force English); restart the panel after changing it. An unknown name is refused at start, naming the tables that exist.
-Only what the page writes is translated: titles, states, stages, buttons, questions, times and numbers. Task titles, ledger and handoff lines, a script's output, a service's status lines, and names of roles, models, branches and folders stay as written.
+Only what the page writes is translated: titles, states, stages, buttons, questions, times and numbers.
+In a service's status lines, durations follow the language, and a loop's line of the shape `last tick <n>s ago, every <n>s`, with the `stalled`, `failing` or `error` that may end it, is put in the table's words; the rest of those lines stays as the service wrote it.
+Task titles, ledger and handoff lines, a script's output, and names of roles, models, branches and folders stay as written.
 
 ## What is tracked, and what never is
 
