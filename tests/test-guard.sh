@@ -108,6 +108,8 @@ for m in warn block off; do
   ok "$m: confirmed service verb reminded" reminded "$(as_coord hook Bash "$(bash_in 'scripts/service.sh run acme restart --confirmed')")"
   eq "$m: hold on is silent" "" "$(as_coord hook Bash "$(bash_in 'scripts/hold.sh on personal/t')")"
   eq "$m: unconfirmed service verb is silent" "" "$(as_coord hook Bash "$(bash_in 'scripts/service.sh run acme ping')")"
+  ok "$m: developer's tier reminded" reminded "$(as_coord hook Bash "$(bash_in 'scripts/dispatch.sh new personal - t T --tier planning --context c --developer-said < m')")"
+  eq "$m: dispatch without the developer's word is silent" "" "$(as_coord hook Bash "$(bash_in 'scripts/dispatch.sh new personal - t T --tier escalated --context c < m')")"
 done
 printf 'GUARD_MODE=block\n' > "$F/config/guard.conf"
 out=$(as_coord hook Bash "$(bash_in 'scripts/hold.sh off x && rm -rf y')")

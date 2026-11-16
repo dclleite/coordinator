@@ -73,6 +73,16 @@ out=$(printf 'x\n' | $S/dispatch.sh new personal - tier-y "Y" --tier escalated -
 ok "escalation in the ledger" grep -q $'\tescalation\tescalated: hard concurrency bug$' "$(val task_dir "$out")/ledger.md"
 ok "context in the brief" grep -q '^more context$' "$(val brief "$out")"
 
+# A tier past escalated is the developer's call: refused without their word, recorded with it.
+err=$(printf 'x\n' | $S/dispatch.sh new personal - tier-p "P" --tier planning --context "$T/ctx" 2>&1 >/dev/null); code=$?
+eq "planning without the developer's word refused" 2 "$code"
+ok "the refusal names the flag and the rule" grep -q "tier 'planning' is the developer's choice.*--developer-said" <<< "$err"
+ok "refused planning made nothing" test ! -e "$COORD_DATA/tasks/personal/tier-p"
+fails 2 "--developer-said without a tier" sh -c "printf 'x' | $S/dispatch.sh new personal - tier-d 'D' --developer-said"
+out=$(printf 'x\n' | $S/dispatch.sh new personal - tier-q "Q" --tier planning --context "$T/ctx" --developer-said 2>/dev/null)
+eq "planning on the developer's word launches" "claude-fable-5-2 medium" "$(val model "$out") $(val effort "$out")"
+ok "the ledger names the developer's word" grep -q $'\tescalation\tplanning, on the developer\'s word: hard concurrency bug$' "$(val task_dir "$out")/ledger.md"
+
 # An unhealthy machine: nothing is created.
 printf '#!/bin/bash\necho "disk_free_gb=3 min=15 LOW"\necho "unhealthy: disk"\nexit 1\n' > "$T/tools/health.sh"
 fails 1 "unhealthy refuses" sh -c "printf 'x' | $S/dispatch.sh new personal - sick 'Sick'"
@@ -93,7 +103,7 @@ fails 2 "unknown option" sh -c "printf x | $S/dispatch.sh new personal - o 'O' -
 
 # tasks: one hit, several hits, none.
 lines=$($S/dispatch.sh tasks)
-eq "every open task listed" 4 "$(printf '%s\n' "$lines" | grep -c .)"
+eq "every open task listed" 5 "$(printf '%s\n' "$lines" | grep -c .)"
 one=$($S/dispatch.sh tasks 'BLOG "POST"')
 eq "one hit, case ignored" "blog-post	Blog \"post\" it's	intake	thr_sub1	$D" "$one"
 eq "several hits" "ABC-123 blog-post push-it" "$($S/dispatch.sh tasks IT | cut -f1 | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"

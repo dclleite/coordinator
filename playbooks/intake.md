@@ -12,12 +12,12 @@ Your job is to find the task, record the words and hand them on; the judging is 
 
 ## A new task
 
-`scripts/dispatch.sh new <scope> <KEY|-> <slug> "<title>" [--fast] [--repo <path>] [--context <file>] < message-file`
+`scripts/dispatch.sh new <scope> <KEY|-> <slug> "<title>" [--fast] [--repo <path>] [--context <file>] [--tier <tier> [--developer-said]] < message-file`
 
 - The scope follows the repositories the task touches; a task that touches any company repository takes the company scope. `-` as the key when there is no ticket.
 - `--fast` only for one fully specified action with no decision (a push, finding a link, running a command): it prepares a fast worker instead of a sub-coordinator and marks the task `trivial`.
 - `--repo` names the repository you already know of; it must lie in the task's scope (`dispatch.sh new` refuses otherwise), and it routes the provider and fills `repositories`. When a company task's first known repository is a personal one, omit `--repo` and name the repository in `--context`.
-- `--context <file>` carries the immediate context you add: the ticket's text, links the developer gave. It is sent after the request block, never inside it. `--tier escalated|planning` needs it, and its first line is the reason, which lands in the ledger.
+- `--context <file>` carries the immediate context you add: the ticket's text, links the developer gave. It is sent after the request block, never inside it. `--tier` needs it, and its first line is the reason, which lands in the ledger. Leave the tier to the sub-coordinator unless the developer named one: `--tier planning` (any tier but `default` and `escalated`) is refused without `--developer-said`, which you add only when the developer asked for that tier in this conversation.
 - It runs the machine check, picks provider and model, appends the message, builds and checks the brief, and prints the launch as `key=value` lines. Exit 1 with `health=` means launch nothing (`AGENTS.md` rule 9).
 
 ## A message for an open task

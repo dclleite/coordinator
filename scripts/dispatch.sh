@@ -1,5 +1,5 @@
 #!/bin/bash
-# dispatch.sh new <scope> <KEY|-> <slug> "<title>" [--fast] [--repo <path>] [--context <file>] [--tier <tier>] < message
+# dispatch.sh new <scope> <KEY|-> <slug> "<title>" [--fast] [--repo <path>] [--context <file>] [--tier <tier> [--developer-said]] < message
 # dispatch.sh add <task-dir> [--to <addressee>] [--question "<text>"] [--context <file>] < message
 # dispatch.sh launched <task-dir> <thread-id>
 # dispatch.sh tasks [<text>]
@@ -8,7 +8,7 @@ set -u
 . "$(dirname "$0")/lib.sh"
 # COORD_TOOLS is where the optional machine scripts are looked up (tests point it at fakes).
 TOOLS=${COORD_TOOLS:-$SCRIPTS}
-usage="usage: dispatch.sh new <scope> <KEY|-> <slug> <title> [--fast] [--repo <path>] [--context <file>] [--tier <tier>] < message
+usage="usage: dispatch.sh new <scope> <KEY|-> <slug> <title> [--fast] [--repo <path>] [--context <file>] [--tier <tier> [--developer-said]] < message
        dispatch.sh add <task-dir> [--to <addressee>] [--question <text>] [--context <file>] < message
        dispatch.sh launched <task-dir> <thread-id>
        dispatch.sh tasks [<text>]
@@ -163,10 +163,11 @@ case "$cmd" in
   new)
     [ $# -ge 4 ] || die 2 "$usage"
     scope=$1 key=$2 slug=$3 title=$4; shift 4
-    fast=0 repo="" ctx="" tier=default
+    fast=0 repo="" ctx="" tier=default said=0
     while [ $# -gt 0 ]; do
       case "$1" in
         --fast) fast=1; shift ;;
+        --developer-said) said=1; shift ;;
         --repo|--context|--tier)
           [ $# -ge 2 ] && [ -n "$2" ] || die 2 "$1 needs a value"
           case "$1" in --repo) repo=$2 ;; --context) ctx=$2 ;; --tier) tier=$2 ;; esac; shift 2 ;;
@@ -175,6 +176,11 @@ case "$cmd" in
     done
     [ -z "$ctx" ] || [ -f "$ctx" ] || die 2 "context file not found: $ctx"
     [ "$tier" = default ] || [ -n "$ctx" ] || die 2 "--tier $tier needs --context, whose first line is the reason"
+    case "$tier:$said" in
+      default:1) die 2 "--developer-said goes with --tier <tier>: it records that the developer asked for that tier" ;;
+      default:*|escalated:*|*:1) ;;
+      *) die 2 "refused: tier '$tier' is the developer's choice, never an agent's; pass --developer-said only on the developer's explicit word for this launch, in this conversation (an agent picks default, or escalated with a reason)" ;;
+    esac
     if [ -n "$repo" ]; then
       routed=$("$SCRIPTS/route.sh" scope "$repo") || exit $?
       [ "$routed" = "$scope" ] || die 1 "refused: $repo is in the $routed scope, not $scope"
@@ -190,7 +196,8 @@ case "$cmd" in
     else role=sub-coordinator; fi
     [ -z "$repo" ] || "$SCRIPTS/task-set.sh" "$NEWDIR" repositories "$repo" || exit $?
     if [ "$tier" != default ]; then
-      "$SCRIPTS/ledger.sh" "$NEWDIR" escalation "$tier: $(head -1 "$ctx")" || exit $?
+      by=""; [ "$said" = 0 ] || by=", on the developer's word"
+      "$SCRIPTS/ledger.sh" "$NEWDIR" escalation "$tier$by: $(head -1 "$ctx")" || exit $?
     fi
     prepare "$NEWDIR" "$role" "$provider" "$MODEL" "$EFFORT" "" "$ctx"
     stop_refused "$NEWDIR"

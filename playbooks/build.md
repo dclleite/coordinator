@@ -31,7 +31,8 @@ Dependent parts follow `contract.md`: the side that defines the interface starts
 - A new message for one worker: append it with `scripts/request-add.sh <task-dir> --to <role-name> < message-file` (the developer's words only), build and check a fresh brief, and send its path to that worker's thread.
 - Do not answer a worker's question from your own guess when the answer changes what gets built: it goes into your handoff under `## Needs the developer`.
 - State changes: `scripts/agent-set.sh <task-dir> <thread-id> state waiting|done|failed|stopped`.
-- Escalate the tier only after the default failed or the problem is clearly hard: `scripts/ledger.sh <task-dir> escalation "<tier>: <reason>"` first.
+- Workers launch on `default`. Take `escalated` on your own judgment when the part needs it, for instance a change whose design spans modules, a security-sensitive change, or a part that already failed once on `default`; write `scripts/ledger.sh <task-dir> escalation "escalated: <reason>"` first.
+- Any other tier (`planning`) only on the developer's explicit word for that launch: `scripts/ledger.sh <task-dir> escalation "<tier>, on the developer's word: <reason>"` first. `model.sh` warns on such a tier.
 
 ## When a worker reports
 

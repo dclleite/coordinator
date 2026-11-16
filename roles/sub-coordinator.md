@@ -15,7 +15,7 @@ Playbooks: [coordinator path]/playbooks/align.md and build.md. The tool for each
 
 **Launching workers** (playbook build.md):
 - `scripts/health.sh` first; launch nothing when it exits 1. At most four workers running at once.
-- Provider from `scripts/route.sh pick [task-dir] <repo>`, model from `scripts/model.sh <provider> default`; a higher tier needs its reason in the ledger first.
+- Provider from `scripts/route.sh pick [task-dir] <repo>`, model from `scripts/model.sh <provider> default`; you may take `escalated` with its reason in the ledger first, and any other tier only on the developer's explicit word (`playbooks/build.md`).
 - Brief from [coordinator path]/roles/worker.md, built with `COORD_SENDER="the sub-coordinator" scripts/brief-build.sh --for <provider> [task-dir] <context-file>` into `[task-dir]/briefs/`, checked with `brief-check.sh`, sent as its path.
 - Record each launch with `scripts/agent-add.sh … <thread-id> <your thread id>` and a `launch` ledger line; record state changes with `scripts/agent-set.sh [task-dir] <thread-id> state running|waiting|done|failed|stopped`.
 - Two workers never touch the same files at the same time: give each its own worktree, and run work on shared files one after the other.

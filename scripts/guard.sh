@@ -223,9 +223,10 @@ case "$tool" in
   Bash)
     [ -f "$tmp/f.tool_input.command" ] || : > "$tmp/f.tool_input.command"
     shell_parts > "$tmp/parts"
-    # Lifting a hold or a confirmed service verb is the developer's call, given in this thread.
+    # Lifting a hold, a confirmed service verb or a developer's tier is the developer's call, given in this thread.
     awk -F'\t' '$1 == "CMD" { c = $2; sub(/.*\//, "", c); n = 0; a = "" }
-      $1 == "ARG" { if (++n == 1) a = $2; if ((c == "hold.sh" && a == "off") || (c == "service.sh" && a == "run" && $2 == "--confirmed")) r = 1 }
+      $1 == "ARG" { if (++n == 1) a = $2; if ((c == "hold.sh" && a == "off") || (c == "service.sh" && a == "run" && $2 == "--confirmed") ||
+        (c == "dispatch.sh" && $2 == "--developer-said")) r = 1 }
       END { exit !r }' "$tmp/parts" && remind=1
     if grep -q '^REJECT' "$tmp/parts" || ! grep -q '^CMD' "$tmp/parts"; then rule=shell
     else

@@ -108,6 +108,7 @@ The records, scripts and rules are the same in every runtime; only the tools for
 1. Add a row to `.private/config/providers.tsv`: name, account kind (`company`, `personal` or `local`), the runtime's id for it, the effort option name, the binary and a headless launch template. `scripts/providers.sh detect --write` proposes rows for what is installed; it never decides the account.
    `scripts/setup.sh` seeds every row with account `unknown` and asks for each one.
 2. Add its tiers (`default`, `escalated`, `planning`) to `.private/config/models.tsv`, which overrides the tracked `config/models.tsv`.
+   Agents launch on `default` and may take `escalated` on their own judgment; `planning`, and any other tier you add, is used only on your explicit word.
 3. Route folders to it in `.private/config/routing.tsv` if it should be preferred somewhere.
 
 A provider is allowed in a folder only when the folder's scope accepts its account kind (`.private/config/scopes.tsv`); `scripts/route.sh check` decides, and an unknown provider counts as `personal`, so it never enters a company folder by omission.

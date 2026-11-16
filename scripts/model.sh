@@ -32,4 +32,5 @@ if ! r=$(row "$1" "$2"); then
 fi
 [ "$(printf '%s' "$r" | cut -f3)" = untuned ] && untuned=${untuned:-marked untuned}
 [ -z "$untuned" ] || echo "warning: $1 $2 is untuned ($untuned)" >&2
+case "$2" in default|escalated) ;; *) echo "warning: tier $2 needs the developer's explicit word for this launch, in this conversation" >&2 ;; esac
 printf '%s\n' "$r" | cut -f1,2

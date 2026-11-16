@@ -53,7 +53,7 @@ It records each request and hands it, unchanged, to the agent that will do the t
 | Coordinator | Thin: dispatch, report, show. A hook warns (or blocks) on anything else in its session. |
 | Sub-coordinator | A full thread or terminal per task, not a subagent, reused for every later message of the task. The developer may type into it directly. |
 | Fast path | One fully specified action with no decision goes straight to one worker. |
-| Escalation | Higher effort only when clearly needed, with the reason in the ledger. A premium planning model for open architecture, sparingly. Same logic for every provider. |
+| Escalation | Higher effort only when clearly needed, with the reason in the ledger. A premium planning model only on the developer's word. Same logic for every provider. |
 | Verbatim rule | Every message the developer writes is passed on unchanged. Context may be added after it. |
 | Simple or complex | The sub-coordinator judges and says so. Simple tasks run on their own; complex ones are agreed first. |
 | Human gate | The developer reviews the result (a realistic demo, or the running flow) before anything goes public. |
@@ -102,11 +102,13 @@ Long waits belong to the agent that owns them: a sub-coordinator waits on its wo
 `route.sh pick` chooses the provider for a task: the one routed to the repository when the boundary allows it, else the one routed to the task's scope, else the first provider the scope accepts.
 The model and effort come from the tier (`config/models.tsv`, overridden by `.private/config/models.tsv`).
 
-| Tier | When |
-|---|---|
-| default | Everything, unless a reason is written to the ledger |
-| escalated | The default failed, or the problem is clearly hard |
-| planning | Complex planning with open architecture |
+| Tier | Chosen by | When |
+|---|---|---|
+| default | the agent | Everything, unless a reason is written to the ledger |
+| escalated | the agent | The default failed, or the problem is clearly hard |
+| planning | the developer | Only on their explicit word for that launch (`dispatch.sh --developer-said`) |
+
+Every tier past `escalated` is the developer's, for every provider; `model.sh` warns on one and `dispatch.sh` refuses it without the flag.
 
 Effort is always set explicitly at launch.
 
