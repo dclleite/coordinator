@@ -43,6 +43,8 @@ gone() { local i=0; while kill -0 "$1" 2>/dev/null && [ $i -lt 100 ]; do sleep 0
 setconf PANEL_PORT_FROM "$(free_port)"
 setconf PANEL_REFRESH_SEC 1
 A=$($S/task-new.sh company ACME-1 alpha "Alpha secret title")
+for n in 1 2 3 4 5 6 7 8 9 10; do $S/ledger.sh "$A" note "line $n" >/dev/null; done
+Bt=$($S/task-new.sh company ACME-2 beta "Beta closed"); $S/task-set.sh "$Bt" status closed
 mkdir -p "$COORD_DATA/services"
 cat > "$COORD_DATA/services/acme.conf" <<'CONF'
 status=echo ok
@@ -90,6 +92,13 @@ fails 1 "page makes no external request" grep -qiE '(src|href)="?https?:|@import
 ok "page asks only while its tab is visible" grep -q 'document.hidden' "$H"
 ok "page removes the key from the address bar" grep -q 'history.replaceState' "$H"
 fails 1 "page uses no browser dialog" grep -qE '(alert|confirm|prompt)\(' "$H"
+fails 1 "page names no network address at all" grep -qiE 'https?://|//[a-z0-9.-]+\.[a-z]{2,}/' "$H"
+ok "page asks for no favicon from the server" grep -qF '<link rel="icon" href="data:,">' "$H"
+fails 1 "served page has every placeholder filled" grep -qF '__PANEL_' "$W/body"
+ok "an action button is disabled while another runs" grep -qF 'b.disabled = !!ui.running' "$H"
+ok "a confirm button only opens the question" grep -qF 'if (confirm) { ui.asking = key' "$H"
+eq "only the question's own button sends confirmed" 1 "$(grep -c 'press(a, target, true' "$H")"
+ok "Escape closes the question" grep -qF '"Escape"' "$H"
 
 # Protection.
 eq "board without token refused" 403 "$(req GET /api/board)"
@@ -110,6 +119,10 @@ fails 1 "hold untouched by the refused presses" grep -q $'\thold\t' "$A/ledger.m
 # Board and actions.
 eq "board answers" 200 "$(req GET /api/board -H "X-Panel-Token: $(tok)")"
 ok "board is board.json" grep -q '"title": "Alpha secret title"' "$W/body"
+bj() { python3 -c 'import json,sys; print(eval(sys.argv[1], {"j": json.load(open(sys.argv[2]))}))' "$1" "$W/body"; }
+eq "board says it was rebuilt" True "$(bj 'j["panel"]["rebuilt"]')"
+eq "board carries the ledger tail of open tasks" "company/ACME-1-alpha" "$(bj '" ".join(sorted(j["panel"]["ledgers"]))')"
+eq "board carries closed tasks" "company/ACME-2-beta Beta closed" "$(bj '" ".join(c["task"]+" "+c["title"] for c in j["panel"]["closed"])')"
 ok "no cross-origin header on an answer" sh -c "! grep -qi '^access-control-' '$W/hdr'"
 eq "actions answer" 200 "$(req GET /api/actions -H "X-Panel-Token: $(tok)")"
 cp "$W/body" "$W/actions"
@@ -234,6 +247,17 @@ i=0; while kill -0 "$pid" 2>/dev/null && [ $i -lt 150 ]; do sleep 0.1; i=$((i + 
 ok "idle server exited by itself" sh -c "! kill -0 $pid 2>/dev/null"
 i=0; while [ -e "$P/pid" ] && [ $i -lt 20 ]; do sleep 0.1; i=$((i + 1)); done
 ok "idle exit removed the files" test ! -e "$P/pid" -a ! -e "$P/port" -a ! -e "$P/token"
+
+# The board is cached per kind: a live request right after a plain one rebuilds it.
+setconf PANEL_IDLE_MIN 1; setconf PANEL_REFRESH_SEC 120
+start_ok "start for the board cache"
+mt() { python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_mtime_ns)' "$COORD_DATA/board.json"; }
+req GET /api/board -H "X-Panel-Token: $(tok)" >/dev/null; m1=$(mt)
+req GET /api/board -H "X-Panel-Token: $(tok)" >/dev/null
+eq "a second plain request is served from the cache" "$m1" "$(mt)"
+eq "a live request answers" 200 "$(req GET '/api/board?live=1' -H "X-Panel-Token: $(tok)")"
+ok "a live request rebuilds the board" sh -c "[ '$(mt)' != '$m1' ]"
+$S/panel.sh stop >/dev/null; setconf PANEL_REFRESH_SEC 1
 
 # Ports: one already listening is never taken.
 p=$(free_port); setconf PANEL_PORT_FROM "$p"; setconf PANEL_IDLE_MIN 1

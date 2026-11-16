@@ -1,10 +1,10 @@
 # id	class	scope	label	argv
 # class: auto | confirm | never. scope: global | task | service. argv runs from scripts/, split on spaces, no shell.
 # Placeholders are whole words only: {task_dir} {service} {verb}. A service row's class is the stricter of its own and the binding's.
-refresh	auto	global	Rebuild the board	board.sh
-inbox-seen	auto	global	Mark finished work as seen	report.sh
+refresh	auto	global	Refresh now	board.sh
+inbox-seen	auto	global	Mark them as read	report.sh
 hold-all-on	auto	global	Hold every merge	hold.sh on --all
-hold-all-off	confirm	global	Lift the global merge hold	hold.sh off --all
+hold-all-off	confirm	global	Lift the hold on every merge	hold.sh off --all
 reap-preview	auto	global	Preview the cleanup	reap.sh --dry-run
 reap	confirm	global	Run the cleanup	reap.sh
 panel-stop	auto	global	Stop this panel	panel.sh stop

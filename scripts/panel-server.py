@@ -21,6 +21,8 @@ OUTPUT_MAX = 4000
 BODY_MAX = 16384
 ACTION_TIMEOUT = 300
 BOARD_TIMEOUT = 120
+LEDGER_TAIL = 8
+CLOSED_MAX = 30
 CLASS_RANK = {"auto": 0, "confirm": 1, "never": 2}
 PLACEHOLDERS = ("{task_dir}", "{service}", "{verb}")
 SCRIPT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*\.sh$")
@@ -72,6 +74,8 @@ class Panel:
         self.last_file = os.path.join(a.data, "panel", "last")
         self.last_request = time.monotonic()
         self.last_board = 0.0
+        self.last_live = None
+        self.board_ok = True
         self.board_lock = threading.Lock()
         self.log_lock = threading.Lock()
 
@@ -191,20 +195,61 @@ class Panel:
         return {"id": a["id"], "class": cls, "label": label, "command": " ".join(words)}
 
     def board(self, live):
+        """board.json plus what the page needs that the board does not carry; None when there is no board."""
         with self.board_lock:
-            if time.monotonic() - self.last_board >= self.refresh or self.last_board == 0.0:
+            # The cache is per kind: a live request after a plain one must not get the plain board back.
+            if (self.last_board == 0.0 or live != self.last_live
+                    or time.monotonic() - self.last_board >= self.refresh):
                 argv = [os.path.join(self.scripts, "board.sh")] + (["--live"] if live else [])
                 try:
-                    subprocess.run(argv, cwd=self.scripts, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, timeout=BOARD_TIMEOUT)
+                    p = subprocess.run(argv, cwd=self.scripts, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, timeout=BOARD_TIMEOUT)
+                    self.board_ok = p.returncode == 0
                 except (OSError, subprocess.TimeoutExpired):
-                    pass
-                self.last_board = time.monotonic()
+                    self.board_ok = False
+                self.last_board, self.last_live = time.monotonic(), live
             try:
-                with open(os.path.join(self.data, "board.json"), "rb") as f:
-                    return f.read()
-            except OSError:
+                with open(os.path.join(self.data, "board.json"), encoding="utf-8") as f:
+                    board = json.load(f)
+            except (OSError, ValueError):
                 return None
+        if not isinstance(board, dict):
+            return None
+        closed, ledgers = self.task_extras()
+        board["panel"] = {"rebuilt": self.board_ok, "closed": closed, "ledgers": ledgers,
+                          "idle_min": self.idle / 60, "refresh_sec": self.refresh}
+        return board
+
+    def task_extras(self):
+        """Closed tasks, newest first, and the ledger tail of every open task, keyed scope/folder."""
+        closed, ledgers = [], {}
+        root = os.path.join(self.data, "tasks")
+        try:
+            scopes = sorted(os.listdir(root))
+        except OSError:
+            return closed, ledgers
+        for s in scopes:
+            sd = os.path.join(root, s)
+            if not os.path.isdir(sd):
+                continue
+            for t in sorted(os.listdir(sd)):
+                d = os.path.join(sd, t)
+                fm = frontmatter(os.path.join(d, "task.md"))
+                ledger = os.path.join(d, "ledger.md")
+                if fm.get("status") == "open":
+                    ledgers[s + "/" + t] = ledger_tail(ledger, LEDGER_TAIL)
+                elif fm.get("status") == "closed":
+                    try:
+                        when = os.path.getmtime(ledger if os.path.exists(ledger) else os.path.join(d, "task.md"))
+                    except OSError:
+                        when = 0
+                    closed.append({"task": s + "/" + t, "key": fm.get("key", ""), "title": fm.get("title", ""),
+                                   "stage": fm.get("stage", ""), "scope": s, "_t": when,
+                                   "last": datetime.datetime.fromtimestamp(when).astimezone().isoformat(timespec="seconds")})
+        closed.sort(key=lambda c: c["_t"], reverse=True)
+        for c in closed:
+            del c["_t"]
+        return closed[:CLOSED_MAX], ledgers
 
     def log(self, aid, target, code):
         line = "%s\t%s\t%s\t%s\n" % (stamp(), aid, target or "-", code)
@@ -410,7 +455,8 @@ def make_handler(panel):
                    "img-src 'self' data:; frame-src %s; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
                    % (nonce, frames or "'none'"))
             html = (html.replace("__PANEL_TOKEN__", panel.token).replace("__PANEL_NONCE__", nonce)
-                    .replace("__PANEL_REFRESH__", str(panel.refresh)))
+                    .replace("__PANEL_REFRESH__", str(panel.refresh))
+                    .replace("__PANEL_IDLE__", "%g" % (panel.idle / 60)))
             self.send(200, html, "text/html; charset=utf-8", {"Content-Security-Policy": csp})
 
     return Handler
@@ -446,6 +492,22 @@ class Server(ThreadingHTTPServer):
         # HTTPServer's own bind looks the host name up, which can hang for seconds without DNS.
         socketserver.TCPServer.server_bind(self)
         self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
+
+
+def ledger_tail(path, n):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 65536))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in lines[-n:]:
+        c = line.split("\t", 2)
+        if len(c) == 3:
+            out.append({"time": c[0], "event": c[1], "text": c[2]})
+    return out
 
 
 def write_atomic(path, text):

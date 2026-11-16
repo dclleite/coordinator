@@ -55,8 +55,9 @@ The same board is written to `.private/board.md` and `.private/board.json` for a
 ## The panel
 
 `scripts/panel.sh start` serves the board as a page on this machine and prints its address with a key (the page opens only from that address; `panel.sh url` prints it again); `panel.sh status` says whether it runs and `panel.sh stop` ends it.
-The page shows the same sections as the text board, refreshes while its tab is visible, and has buttons for a fixed list of actions (`config/panel-actions.tsv`): refresh, mark the inbox seen, hold or release a merge, sweep a task, preview or run the reaper, a service's verbs.
-A button that needs your word asks in the page first.
+The page reads top to bottom: what needs you (tasks waiting on you, handoffs not yet read, merge holds, an unhealthy machine, a service that is down), or one calm line when nothing does; then each open task with its stage and its tree of agents, where every state has its own shape and word and finished agents fold into a count; then one folded row each for services, the machine, cleanup, record problems, closed tasks and the panel itself.
+It refreshes while its tab is visible, and says plainly when the board is old or the server has stopped.
+Its buttons run a fixed list of actions (`config/panel-actions.tsv`) and sit next to what they act on: an `auto` action runs at once and shows its result in place; a `confirm` action (its label ends in "…") first asks in the page, naming the command, and the server refuses it without that answer; a `never` action is not offered.
 It listens on `127.0.0.1` only, with a fresh key per start that the page and every API request must carry, and refuses requests from any other site.
 It exits by itself after `PANEL_IDLE_MIN` minutes without a request (`config/panel.conf`); if it did not, `reap.sh` stops it after twice that time. It is never started at login.
 It needs Python 3; without it, `scripts/status.sh` still prints the board.
