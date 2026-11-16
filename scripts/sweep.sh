@@ -114,6 +114,8 @@ case "${1:-}" in
     c=$(count_of "$F2"); st=$(state_of "$c" "$limit"); ids=""
     if [ "$list" != "-" ] && all=$(run_cmd "$list"); then
       owned=$(owned_ids "$kind")
+      # The panel is the coordinator's own: left over only once panel.sh reap would stop it for being idle.
+      [ "$kind" = panel ] && [ -z "$("$SCRIPTS/panel.sh" reap --dry-run 2>/dev/null)" ] && all=""
       while IFS= read -r id; do
         [ -n "$id" ] || continue
         grep -qxF -- "$id" <<< "$owned" && continue

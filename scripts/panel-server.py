@@ -24,9 +24,13 @@ BOARD_TIMEOUT = 120
 LEDGER_TAIL = 8
 CLOSED_MAX = 30
 CLASS_RANK = {"auto": 0, "confirm": 1, "never": 2}
-PLACEHOLDERS = ("{task_dir}", "{service}", "{verb}")
+PLACEHOLDERS = ("{task_dir}", "{service}", "{verb}", "{until}")
 SCRIPT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*\.sh$")
 WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# The only shape {until} takes: a time as the inbox writes it.
+TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$")
+VERB_LINE = re.compile(r"^verb\.([A-Za-z0-9._-]+)=(auto|confirm):")
+LABEL_LINE = re.compile(r"^verb\.([A-Za-z0-9._-]+)\.label=(.+)$")
 # Which buttons apply depends on the hold state; ids absent here always apply.
 APPLIES = {
     "hold-on": lambda t, g: t.get("hold_merge") != "yes",
@@ -78,6 +82,8 @@ class Panel:
         self.board_ok = True
         self.board_lock = threading.Lock()
         self.log_lock = threading.Lock()
+        self.run_lock = threading.Lock()
+        self.running = set()
 
     def touch(self):
         # Wall-clock seconds on disk: panel.sh reap reads them to stop a server that never exited by itself.
@@ -107,7 +113,7 @@ class Panel:
         return found
 
     def services(self):
-        """Service name -> {verb: class} read from DATA/services/<name>.conf; the panel= line too."""
+        """Service name -> verbs {verb: class}, labels {verb: text} and the panel= line, from DATA/services/<name>.conf."""
         out = {}
         sd = os.path.join(self.data, "services")
         try:
@@ -117,19 +123,21 @@ class Panel:
         for n in names:
             if not n.endswith(".conf") or not WORD.match(n[:-5]):
                 continue
-            verbs, panel = {}, ""
+            verbs, labels, panel = {}, {}, ""
             try:
                 with open(os.path.join(sd, n), encoding="utf-8", errors="replace") as f:
                     for line in f.read().splitlines():
                         line = line.rstrip("\r")
-                        m = re.match(r"^verb\.([A-Za-z0-9._-]+)=(auto|confirm):", line)
-                        if m and m.group(1) not in verbs:
+                        lab, m = LABEL_LINE.match(line), VERB_LINE.match(line)
+                        if lab:
+                            labels.setdefault(lab.group(1), lab.group(2).strip())
+                        elif m and not m.group(1).endswith(".label") and m.group(1) not in verbs:
                             verbs[m.group(1)] = m.group(2)
                         elif line.startswith("panel=") and not panel:
                             panel = line[6:]
             except OSError:
                 continue
-            out[n[:-5]] = {"verbs": verbs, "panel": panel}
+            out[n[:-5]] = {"verbs": verbs, "labels": labels, "panel": panel}
         return out
 
     def actions(self):
@@ -181,6 +189,8 @@ class Panel:
                         if cls != "never":
                             b = self.button(a, cls, {"{service}": name, "{verb}": verb})
                             b["verb"] = verb
+                            if s["labels"].get(verb):
+                                b["label"] = s["labels"][verb]
                             per_svc[name].append(b)
         for k, (d, fm) in tasks.items():
             out["tasks"].append({"task": k, "dir": d, "actions": per_task[k]})
@@ -251,15 +261,46 @@ class Panel:
             del c["_t"]
         return closed[:CLOSED_MAX], ledgers
 
-    def log(self, aid, target, code):
-        line = "%s\t%s\t%s\t%s\n" % (stamp(), aid, target or "-", code)
+    def log(self, cls, aid, target, code):
+        # A refused press carries what the request sent: keep it one short printable field.
+        clean = lambda v: re.sub(r"[^\x21-\x7e ]", "?", str(v or "-"))[:120] or "-"
+        line = "%s\t%s\t%s\t%s\t%s\n" % (stamp(), clean(cls), clean(aid), clean(target), code)
         with self.log_lock:
             with open(os.path.join(self.data, "panel", "log"), "a", encoding="utf-8") as f:
                 f.write(line)
 
     def run(self, req):
-        """Returns (http status, answer dict)."""
-        for k in ("id", "task", "service", "verb"):
+        """Returns (http status, answer dict); a press that does not run is logged as refused."""
+        code, answer, logged = self.run_checked(req)
+        if not logged:
+            cls, target = answer.pop("_class", "-"), answer.pop("_target", None)
+            if target is None:
+                target = " ".join(str(req.get(k, "")) for k in ("task", "service", "verb") if req.get(k)) or "-"
+            self.log(cls, req.get("id", "-"), target, "refused")
+        return code, answer
+
+    def run_checked(self, req):
+        """Returns (http status, answer dict, whether the press is already in the log)."""
+        r = self.prepare(req)
+        if len(r) == 2:
+            return r[0], r[1], False
+        a, cls, argv, target, task_dir = r
+        key = (a["id"], target)
+        with self.run_lock:
+            if key in self.running:
+                return 409, {"error": "already running", "_class": cls, "_target": target}, False
+            self.running.add(key)
+        try:
+            if a["argv"][0] == "panel.sh":
+                return self.stop_later(a, cls, argv, target) + (True,)
+            return self.execute(a, cls, argv, target, task_dir) + (True,)
+        finally:
+            with self.run_lock:
+                self.running.discard(key)
+
+    def prepare(self, req):
+        """(status, answer) when the press is refused; otherwise (action, class, argv, target, task dir)."""
+        for k in ("id", "task", "service", "verb", "until"):
             if not isinstance(req.get(k, ""), str):
                 return 400, {"error": "%s must be a string" % k}
         if not isinstance(req.get("confirmed", False), bool):
@@ -287,18 +328,24 @@ class Panel:
             cls = max(cls, svcs[name]["verbs"][verb], key=CLASS_RANK.get)
             subst["{service}"], subst["{verb}"] = name, verb
             target = name + " " + verb
+        if "{until}" in a["argv"]:
+            if not TIMESTAMP.match(req.get("until", "")):
+                return 400, {"error": "until must be a time such as 2026-01-31T09:00:00+00:00", "_class": cls}
+            subst["{until}"] = req["until"]
         if cls == "never":
             return 404, {"error": "no such action"}
         if cls == "confirm" and req.get("confirmed") is not True:
-            return 428, {"error": "needs confirmation", "confirm": True}
+            return 428, {"error": "needs confirmation", "confirm": True, "_class": cls, "_target": target}
         argv = [subst.get(w, w) for w in a["argv"]]
         argv[0] = os.path.join(self.scripts, argv[0])
         if a["scope"] == "service" and cls == "confirm":
             argv.append("--confirmed")
         if not os.access(argv[0], os.X_OK):
-            return 404, {"error": "the action's script is missing"}
-        if a["argv"][0] == "panel.sh":
-            return self.stop_later(a, argv, target)
+            return 404, {"error": "the action's script is missing", "_class": cls, "_target": target}
+        return a, cls, argv, target, task_dir
+
+    def execute(self, a, cls, argv, target, task_dir):
+        aid = a["id"]
         try:
             p = subprocess.run(argv, cwd=self.scripts, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, timeout=ACTION_TIMEOUT)
@@ -307,7 +354,7 @@ class Panel:
             code, out = 124, (e.output or b"") + b"\n(timed out)"
         except OSError:
             code, out = 127, b"could not start the action"
-        self.log(aid, target, code)
+        self.log(cls, aid, target, code)
         if task_dir:
             subprocess.run([os.path.join(self.scripts, "ledger.sh"), task_dir, "panel",
                             "button %s exit %d" % (aid, code)],
@@ -318,13 +365,13 @@ class Panel:
             text = text[:OUTPUT_MAX] + "\n(cut)"
         return 200, {"exit": code, "output": text}
 
-    def stop_later(self, a, argv, target):
+    def stop_later(self, a, cls, argv, target):
         # panel.sh stop ends this process, so it runs detached after the answer has gone out.
         def later():
             time.sleep(0.3)
             subprocess.Popen(argv, cwd=self.scripts, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)
-        self.log(a["id"], target, 0)
+        self.log(cls, a["id"], target, 0)
         threading.Thread(target=later, daemon=True).start()
         return 200, {"exit": 0, "output": "the panel is stopping"}
 

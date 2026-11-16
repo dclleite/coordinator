@@ -44,12 +44,18 @@ setconf PANEL_PORT_FROM "$(free_port)"
 setconf PANEL_REFRESH_SEC 1
 A=$($S/task-new.sh company ACME-1 alpha "Alpha secret title")
 for n in 1 2 3 4 5 6 7 8 9 10; do $S/ledger.sh "$A" note "line $n" >/dev/null; done
-Bt=$($S/task-new.sh company ACME-2 beta "Beta closed"); $S/task-set.sh "$Bt" status closed
+Bt=$($S/task-new.sh company ACME-2 beta "Beta closed"); $S/task-set.sh "$Bt" stage done
+# An abandoned task is closed at the stage it reached.
+Ct=$($S/task-new.sh personal ACME-3 gamma "Gamma abandoned"); $S/task-set.sh "$Ct" stage build; $S/task-set.sh "$Ct" status closed
+# Closed tasks are ordered by their last ledger write: beta is the newest.
+touch -t 202601010000 "$Ct/ledger.md"; touch -t 202602010000 "$Bt/ledger.md"
 mkdir -p "$COORD_DATA/services"
 cat > "$COORD_DATA/services/acme.conf" <<'CONF'
 status=echo ok
 verb.ping=auto:echo pong
+verb.ping.label=Ping it
 verb.restart=confirm:touch restarted.txt
+verb.slow=auto:sleep 2; echo slept
 panel=http://127.0.0.1:9/
 CONF
 
@@ -95,10 +101,8 @@ fails 1 "page uses no browser dialog" grep -qE '(alert|confirm|prompt)\(' "$H"
 fails 1 "page names no network address at all" grep -qiE 'https?://|//[a-z0-9.-]+\.[a-z]{2,}/' "$H"
 ok "page asks for no favicon from the server" grep -qF '<link rel="icon" href="data:,">' "$H"
 fails 1 "served page has every placeholder filled" grep -qF '__PANEL_' "$W/body"
-ok "an action button is disabled while another runs" grep -qF 'b.disabled = !!ui.running' "$H"
-ok "a confirm button only opens the question" grep -qF 'if (confirm) { ui.asking = key' "$H"
-eq "only the question's own button sends confirmed" 1 "$(grep -c 'press(a, target, true' "$H")"
-ok "Escape closes the question" grep -qF '"Escape"' "$H"
+# What the page does when pressed (running guard, Escape, focus, results that survive a refresh) is checked in a
+# browser by tests/browser/panel-check.sh, run by hand.
 
 # Protection.
 eq "board without token refused" 403 "$(req GET /api/board)"
@@ -122,14 +126,22 @@ ok "board is board.json" grep -q '"title": "Alpha secret title"' "$W/body"
 bj() { python3 -c 'import json,sys; print(eval(sys.argv[1], {"j": json.load(open(sys.argv[2]))}))' "$1" "$W/body"; }
 eq "board says it was rebuilt" True "$(bj 'j["panel"]["rebuilt"]')"
 eq "board carries the ledger tail of open tasks" "company/ACME-1-alpha" "$(bj '" ".join(sorted(j["panel"]["ledgers"]))')"
-eq "board carries closed tasks" "company/ACME-2-beta Beta closed" "$(bj '" ".join(c["task"]+" "+c["title"] for c in j["panel"]["closed"])')"
+eq "the ledger tail is the last 8 lines" "8 line 3 line 10" "$(bj '(lambda l: "%d %s %s" % (len(l), l[0]["text"], l[-1]["text"]))(j["panel"]["ledgers"]["company/ACME-1-alpha"])')"
+eq "board carries closed tasks, newest first, with their stage" "company/ACME-2-beta:Beta closed:done personal/ACME-3-gamma:Gamma abandoned:build" \
+  "$(bj '" ".join(c["task"]+":"+c["title"]+":"+c["stage"] for c in j["panel"]["closed"])')"
+# A rebuild that fails is said, not served as current.
+chmod a-w "$COORD_DATA"; sleep 1.1
+req GET /api/board -H "X-Panel-Token: $(tok)" >/dev/null
+chmod u+w "$COORD_DATA"
+eq "board says when rebuilding it failed" False "$(bj 'j["panel"]["rebuilt"]')"
 ok "no cross-origin header on an answer" sh -c "! grep -qi '^access-control-' '$W/hdr'"
 eq "actions answer" 200 "$(req GET /api/actions -H "X-Panel-Token: $(tok)")"
 cp "$W/body" "$W/actions"
 pick() { python3 -c 'import json,sys; print(eval(sys.argv[1], {"j": json.load(open(sys.argv[2]))}))' "$1" "$W/actions"; }
 eq "global buttons" "refresh inbox-seen hold-all-on reap-preview reap panel-stop" "$(pick '" ".join(a["id"] for a in j["global"])')"
 eq "task buttons apply now" "company/ACME-1-alpha: hold-on sweep-task" "$(pick '"; ".join(t["task"]+": "+" ".join(a["id"] for a in t["actions"]) for t in j["tasks"])')"
-eq "service verbs take the binding's class" "ping:auto restart:confirm" "$(pick '" ".join(a["verb"]+":"+a["class"] for s in j["services"] for a in s["actions"])')"
+eq "service verbs take the binding's class" "ping:auto restart:confirm slow:auto" "$(pick '" ".join(a["verb"]+":"+a["class"] for s in j["services"] for a in s["actions"])')"
+eq "a binding's label names the verb, else the table's label" "Ping it|Run restart|Run slow" "$(pick '"|".join(a["label"] for s in j["services"] for a in s["actions"])')"
 eq "a button says what it runs" "hold.sh on company/ACME-1-alpha" "$(pick 'j["tasks"][0]["actions"][0]["command"]')"
 
 # What may run.
@@ -162,7 +174,35 @@ ok "service press in the panel log" grep -q $'\tservice-verb\tacme restart\t0$' 
 ok "press in the task ledger" grep -q $'\tpanel\tbutton sweep-task exit 0$' "$A/ledger.md"
 fails 1 "no output in the panel log" grep -q 'nothing recorded\|pong' "$P/log"
 fails 1 "no output in the ledger" grep -q 'nothing recorded' "$A/ledger.md"
-fails 1 "refused presses not logged" grep -q 'rm-everything\|company/nope' "$P/log"
+ok "a refused press is logged with class, action, target and refused" grep -q $'\tconfirm\thold-off\tcompany/ACME-1-alpha\trefused$' "$P/log"
+ok "an unknown action is logged as refused" grep -q $'\t-\trm-everything\t-\trefused$' "$P/log"
+ok "a press is logged with its class" grep -q $'\tconfirm\tsweep-task\tcompany/ACME-1-alpha\t0$' "$P/log"
+j=$(python3 -c 'import json; print(json.dumps({"id":"hold-on","task":"company/x\ty\nz"}))')
+run "$j" >/dev/null
+eq "a refused value cannot add a line or a field to the log" 0 "$(awk -F'\t' 'NF != 5' "$P/log" | wc -l | tr -d ' ')"
+
+# The same action on the same target never runs twice at once.
+curl -s -o /dev/null -X POST -H "X-Panel-Token: $(tok)" -H 'Content-Type: application/json' \
+  --data-binary '{"id":"service-verb","service":"acme","verb":"slow"}' "http://127.0.0.1:$PORT/api/run" & slow=$!
+i=0; until grep -q 'sleep 2' <<< "$(ps -A -o args=)" || [ $i -ge 50 ]; do sleep 0.1; i=$((i + 1)); done
+eq "a second press while it runs is refused" 409 "$(run '{"id":"service-verb","service":"acme","verb":"slow"}')"
+eq "another target runs meanwhile" 200 "$(run '{"id":"service-verb","service":"acme","verb":"ping"}')"
+wait "$slow"
+eq "it ran once" 1 "$(grep -c $'\tservice-verb\tacme slow\t0$' "$P/log")"
+ok "the second press is logged as refused" grep -q $'\tauto\tservice-verb\tacme slow\trefused$' "$P/log"
+eq "and it runs again once done" 200 "$(run '{"id":"service-verb","service":"acme","verb":"slow"}')"
+
+# Mark as read marks only what the page listed: the handoffs up to the time it sends.
+printf 'First.\n' | COORD_NOW=2026-03-01T10:00:00+00:00 $S/handoff-write.sh "$A" worker coordinator >/dev/null
+printf 'Second.\n' | COORD_NOW=2026-03-01T11:00:00+00:00 $S/handoff-write.sh "$A" worker coordinator >/dev/null
+eq "mark as read needs the time" 400 "$(run '{"id":"inbox-seen"}')"
+eq "a time of another shape is refused" 400 "$(run '{"id":"inbox-seen","until":"2026-03-01 10:00"}')"
+eq "anything after the time is refused" 400 "$(run '{"id":"inbox-seen","until":"2026-03-01T10:00:00+00:00 --peek"}')"
+eq "mark as read runs" 200 "$(run '{"id":"inbox-seen","until":"2026-03-01T10:30:00+00:00"}')"
+ok "it reports what it marked" grep -q 'First\.' "$W/body"
+fails 1 "and not the later one" grep -q 'Second\.' "$W/body"
+eq "one handoff stays unread" 1 "$(awk -F'\t' '$5=="0"' "$COORD_DATA/inbox.tsv" | wc -l | tr -d ' ')"
+ok "the later one" grep -q 'Second\.' "$A/handoffs/$(awk -F'\t' '$5=="0" {print $3}' "$COORD_DATA/inbox.tsv")"
 
 # Shell characters are values, never code.
 j=$(printf '{"id":"service-verb","service":"acme;touch %s","verb":"ping"}' "$W/pwned")
@@ -208,6 +248,14 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\n' panel \
   > "$COORD_DATA/config/resources.tsv"
 eq "resource count while running" 1 "$($S/sweep.sh --run panel count)"
 eq "resource list while running" panel "$($S/sweep.sh --run panel list)"
+# The panel in use is the coordinator's own, not a leftover; once idle past twice its idle time it is one.
+eq "a panel in use is no orphan" "nothing orphaned" "$($S/sweep.sh --orphans)"
+ok "nor on the board" python3 -c 'import json,sys; assert all(r["orphans"] == [] for r in json.loads(sys.argv[1]) if r["kind"] == "panel")' "$($S/sweep.sh --orphans --json)"
+fails 1 "nor in the cleanup preview" grep -q 'panel' <<< "$($S/reap.sh --dry-run 2>/dev/null)"
+cp "$P/last" "$W/last"; echo $(( $(date +%s) - 3700 )) > "$P/last"
+eq "an idle panel is an orphan" "$(printf 'panel\tpanel')" "$($S/sweep.sh --orphans)"
+ok "and the cleanup preview names it" grep -q '^would stop panel: ' <<< "$($S/reap.sh --dry-run 2>/dev/null)"
+cp "$W/last" "$P/last"
 ok "resource stop" "$S/sweep.sh" --run panel stop panel
 ok "the stop ended the server" gone "$pid"
 eq "resource count when stopped" 0 "$($S/sweep.sh --run panel count)"

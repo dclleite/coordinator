@@ -81,3 +81,15 @@ for i in 1 2 3 4 5 6; do printf 'p%s\n' "$i" | $S/handoff-write.sh "$F" worker c
 $S/report.sh >/dev/null
 eq "no inbox line lost beside parallel reports" 6 "$(awk -F'\t' -v d="tasks/personal/quick" '$2==d && $5=="1"' "$COORD_DATA/inbox.tsv" | wc -l | awk '{print $1 - 2}')"
 eq "no lock left" "" "$(ls -a "$COORD_DATA" | grep '\.lock$')"
+
+# --until reports and marks only handoffs written at or before that instant; times compare as instants, not text.
+G=$($S/task-new.sh personal - until "Until")
+printf 'Late one.\n' | COORD_NOW=2026-03-01T10:00:00-03:00 $S/handoff-write.sh "$G" worker coordinator >/dev/null
+printf 'Early one.\n' | COORD_NOW=2026-03-01T11:00:00+00:00 $S/handoff-write.sh "$G" worker coordinator >/dev/null
+eq "until reports only what came before" "until · worker: Early one." "$($S/report.sh --until 2026-03-01T12:00:00+00:00)"
+eq "the later one stays unseen" "until · worker: Late one." "$($S/report.sh --peek)"
+eq "until with peek marks nothing" "until · worker: Late one." "$($S/report.sh --peek --until 2026-03-01T13:00:00Z)"
+eq "until before both reports nothing" "nothing new" "$($S/report.sh --until 2026-03-01T09:00:00Z)"
+eq "then it is reported" "until · worker: Late one." "$($S/report.sh --until 2026-03-01T13:00:00Z)"
+fails 2 "until needs a time" $S/report.sh --until
+fails 2 "until takes only a time" $S/report.sh --until 'yesterday; touch x'
