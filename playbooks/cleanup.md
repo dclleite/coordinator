@@ -10,6 +10,6 @@ The order matters: a closed task's resources are no longer counted as owned.
 - When git refuses a removal, the script queues it in `.private/tasks/cleanup-pending.tsv`. Say how many are queued and how much disk they hold; `scripts/cleanup-pending.sh` retries them.
 - The script removes worktrees, never branches. Local branches left behind (often pointing at commits from before a rewrite or a squash) are listed in the handoff and deleted only with the developer's word.
 - Knowledge worth keeping about the company's systems goes into that repository's own docs through a task there, not into the coordinator (`AGENTS.md` rule 14).
-- `scripts/task-set.sh <task-dir> stage done`, then `status closed`, then `scripts/ledger.sh <task-dir> cleanup "<summary line>"`, and the agents' states with `scripts/agent-set.sh … state done|stopped`.
+- `scripts/task-set.sh <task-dir> stage done` (it also sets `status closed`; an abandoned task gets only `status closed`), then `scripts/ledger.sh <task-dir> cleanup "<summary line>"`, and the agents' states with `scripts/agent-set.sh … state done|stopped`.
 - The task folder stays: it is the record later tasks search.
 - Report in one line what was stopped, removed, queued and kept.

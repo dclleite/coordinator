@@ -24,7 +24,8 @@ $S/agent-add.sh "$D" worker codex m low "$PE/app" - - thr_w2 thr_w1
 printf 'worker\tcodex\tm\tlow\t%s\t-\t-\tthr_old\t-\n' "$PE/app" >> "$D/agents.tsv"
 printf 'Done.\n' | $S/handoff-write.sh "$D" sub-coordinator coordinator >/dev/null
 C=$($S/task-new.sh company ABC-123 c "Company")
-$S/task-set.sh "$C" stage done
+# A record edited by hand: task-set.sh closes a task whose stage is done, so only an edit leaves it open.
+sed 's/^stage: .*/stage: done/' "$C/task.md" > "$C/task.tmp" && mv "$C/task.tmp" "$C/task.md"
 $S/hold.sh on --all
 $S/board.sh
 ok "board with a quoted title is JSON" valid_json "$J"

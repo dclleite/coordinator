@@ -15,6 +15,10 @@ $S/task-set.sh "$D" waiting_on 'review of a\tb & c|d'
 eq "value kept literally" 'waiting_on: review of a\tb & c|d' "$(grep '^waiting_on:' "$D/task.md")"
 fails 2 "unknown field" $S/task-set.sh "$D" colour red
 fails 2 "unknown stage" $S/task-set.sh "$D" stage party
+$S/task-set.sh "$P" stage done
+eq "stage done closes the task" "status: closed|stage: done" "$(grep -e '^stage:' -e '^status:' "$P/task.md" | paste -sd'|' -)"
+Q=$($S/task-new.sh personal - dropped "Dropped"); $S/task-set.sh "$Q" status closed
+eq "a closed task keeps another stage" "status: closed|stage: intake" "$(grep -e '^stage:' -e '^status:' "$Q/task.md" | paste -sd'|' -)"
 $S/agent-add.sh "$D" worker claude claude-opus-5-5 medium $CO/team/service /wt/a acme-1 thr_1
 eq "agent row has 11 columns" 11 "$(awk -F'\t' '{print NF}' "$D/agents.tsv")"
 eq "parent and state defaults" "-	running" "$(cut -f10,11 "$D/agents.tsv")"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# task-set.sh <task-dir> <field> <value>
+# task-set.sh <task-dir> <field> <value>   (stage done also sets status closed)
 set -u
 . "$(dirname "$0")/lib.sh"
 [ $# -eq 3 ] || die 2 "usage: task-set.sh <task-dir> <field> <value>"
@@ -19,9 +19,12 @@ lock=$dir/.task.lock tmp=""
 trap 'rm -f "$tmp"; lock_drop "$lock"' EXIT
 lock_take "$lock"
 tmp=$(mktemp "$dir/.task.XXXXXX") || die 1 "cannot write in $dir"
+# A task whose stage is done is closed in the same write; a closed task may keep another stage (abandoned).
+close=no; [ "$f" = stage ] && [ "$v" = done ] && close=yes
 # The value travels through the environment so awk does not interpret backslashes in it.
-F=$f V=$v awk 'BEGIN{f=ENVIRON["F"]; v=ENVIRON["V"]}
-  NR>1 && /^---$/ { fm=1 } !fm && !done && (index($0, f": ")==1 || $0==f":") { print (v=="" ? f":" : f": "v); done=1; next } {print}
+F=$f V=$v C=$close awk 'BEGIN{f=ENVIRON["F"]; v=ENVIRON["V"]; c=ENVIRON["C"]}
+  NR>1 && /^---$/ { fm=1 } !fm && !done && (index($0, f": ")==1 || $0==f":") { print (v=="" ? f":" : f": "v); done=1; next }
+  !fm && c=="yes" && !closed && index($0, "status: ")==1 { print "status: closed"; closed=1; next } {print}
   END { exit done ? 0 : 3 }' "$dir/task.md" > "$tmp" \
   || { rm -f "$tmp"; die 1 "task.md has no '$f' line: nothing was set"; }
 mv "$tmp" "$dir/task.md"
